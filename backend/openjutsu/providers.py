@@ -1,5 +1,6 @@
 import math
 import time
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -25,7 +26,8 @@ CAPABILITIES = {
     },
     "argolink": {
         "native": False,
-        "portraits": False,
+        "portraits": True,
+        "direct_upload": True,
         "max_mb": 100,
         "max_images": 30,
         "base": "https://argolink.io/v1",
@@ -72,6 +74,9 @@ def qualification_profile(provider, recipe, native=False):
             "mode": recipe["mode"],
             "subjects": [s["kind"] for s in sorted(recipe["subjects"], key=lambda s: s["id"])],
             "phase": "native" if native else "preview",
+            "request_mode": recipe.get("argolink_mode", "reference")
+            if provider == "argolink"
+            else "edit",
         }
     )
 
@@ -88,8 +93,9 @@ class Provider:
         self.client = httpx.Client(
             base_url=self.cap["base"], headers=headers, timeout=60, transport=transport
         )
+        self.media_client = httpx.Client(timeout=120, transport=transport)
 
-    def payload(self, recipe, video_url, references, parent=None):
+    def payload(self, recipe, video_url, references, parent=None, media=None):
         if parent:
             if not self.cap["native"]:
                 raise Rejected("This provider cannot continue drafts")
@@ -103,7 +109,7 @@ class Provider:
         prompt = recipe["prompt"]
         mappings = []
         index = 1
-        for subject in recipe["subjects"]:
+        for subject in sorted(recipe["subjects"], key=lambda s: s["id"]):
             n = (
                 1
                 if subject.get("portrait_asset") and self.name == "byteplus"
@@ -111,22 +117,56 @@ class Provider:
             )
             if n:
                 mappings.append(
-                    f"Replace subject {subject['id']} completely with "
+                    f"Replace subject {subject['id']} ({subject.get('name', 'cast member')}) completely with "
                     + ", ".join(f"@Image {x}" for x in range(index, index + n))
                     + "."
                 )
+                if subject.get("intervals"):
+                    mappings.append(
+                        "This cast member appears at "
+                        + ", ".join(
+                            f"{span['start'] / 24:.3f}–{span['end'] / 24:.3f} seconds"
+                            for span in subject["intervals"]
+                        )
+                        + "."
+                    )
                 index += n
         prompt = " ".join([prompt, *mappings])
         if self.name == "argolink":
-            return {
+            mode = recipe.get("argolink_mode", "reference")
+            payload = {
                 "model": "seedance-2.5",
-                "omni_reference_task_type": "edit",
                 "prompt": prompt,
                 "resolution": "480p",
                 "reference_videos": [{"url": video_url}],
                 "reference_images": [{"url": x} for x in references],
-                "generate_audio": True,
+                "generate_audio": False,
             }
+            if mode == "reference":
+                duration = recipe.get("end", 5) - recipe.get("start", 0)
+                if abs(duration - round(duration)) > 0.001:
+                    raise Rejected("ArgoLink reference generation requires a whole-second interval")
+                ratios = {
+                    "21:9": 21 / 9,
+                    "16:9": 16 / 9,
+                    "4:3": 4 / 3,
+                    "1:1": 1,
+                    "3:4": 3 / 4,
+                    "9:16": 9 / 16,
+                }
+                geometry = media or {"width": 16, "height": 9}
+                ratio = geometry["width"] / geometry["height"]
+                payload.update(
+                    duration=round(duration),
+                    aspect_ratio=min(ratios, key=lambda k: abs(math.log(ratio / ratios[k]))),
+                )
+            else:
+                if references:
+                    raise Rejected(
+                        "ArgoLink edit-plus-images contract is disputed; select reference mode"
+                    )
+                payload["omni_reference_task_type"] = "edit"
+            return payload
         if self.name == "segmind":
             return {
                 "prompt": prompt,
@@ -157,6 +197,60 @@ class Provider:
             "draft": True,
             "generate_audio": True,
         }
+
+    def upload(self, path):
+        """Upload ticket is free. Never send the account header to object storage."""
+        import mimetypes
+
+        path = Path(path)
+        content_type = mimetypes.guess_type(str(path))[0]
+        kind = "video" if content_type == "video/mp4" else "image"
+        if self.name != "argolink" or content_type not in {"video/mp4", "image/png", "image/jpeg"}:
+            raise Rejected("Unsupported direct-upload media")
+        try:
+            response = self.client.post(
+                "/media/uploads",
+                json={
+                    "model": self.cap["model"],
+                    "type": kind,
+                    "content_type": content_type,
+                    "size_bytes": path.stat().st_size,
+                },
+            )
+            if response.status_code >= 400:
+                raise Rejected(f"ArgoLink upload ticket failed (HTTP {response.status_code})")
+            ticket = response.json()
+            for field in ("upload_url", "media_url"):
+                if not isinstance(ticket.get(field), str) or not ticket[field].startswith(
+                    "https://"
+                ):
+                    raise Rejected("ArgoLink returned an invalid secure upload ticket")
+            expires = {}
+            for field in ("upload_expires_at", "expires_at"):
+                value = ticket[field]
+                expires[field] = (
+                    float(value)
+                    if isinstance(value, (int, float))
+                    else datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+                )
+                if expires[field] <= time.time():
+                    raise Rejected("ArgoLink upload ticket has expired")
+            with path.open("rb") as stream:
+                uploaded = self.media_client.put(
+                    ticket["upload_url"],
+                    content=stream,
+                    headers={
+                        "Content-Type": content_type,
+                        "Content-Length": str(path.stat().st_size),
+                    },
+                )
+            if uploaded.status_code >= 300:
+                raise Rejected(f"ArgoLink media upload failed (HTTP {uploaded.status_code})")
+            return {"media_url": ticket["media_url"], **expires}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise Rejected(
+                "Direct upload failed before generation; no generation request was sent"
+            ) from error
 
     def submit(self, payload, native=False):
         endpoint = (
@@ -203,7 +297,13 @@ class Provider:
             return {
                 "status": "failed",
                 "cost": data.get("cost"),
-                "error": "Provider reported failure or expiry; inspect its dashboard",
+                "error": str(
+                    data.get("error", {}).get(
+                        "message", "Provider reported failure or expiry; inspect its dashboard"
+                    )
+                )
+                if isinstance(data.get("error", {}), dict)
+                else "Provider reported failure or expiry; inspect its dashboard",
             }
         if status not in {"succeeded", "completed", "done"}:
             return {"status": "pending", "progress": data.get("progress")}
@@ -231,7 +331,7 @@ class Provider:
         if self.name == "argolink":
             url = self.cap["base"] + f"/videos/{remote}/content"
             billed = data.get("usage", {}).get("billed_seconds")
-            cost = float(billed) * 0.0523 if billed is not None else cost
+            usage_estimate = float(billed) * 0.0523 if billed is not None else None
         if self.name == "byteplus":
             draft = remote
         return {
@@ -240,6 +340,7 @@ class Provider:
             "draft_id": draft,
             "cost": float(cost) if cost is not None else None,
             "usage": data.get("usage"),
+            "usage_estimate_usd": usage_estimate if self.name == "argolink" else None,
         }
 
     def download(self, url, path):
@@ -263,6 +364,7 @@ class Provider:
 
     def close(self):
         self.client.close()
+        self.media_client.close()
 
 
 class Uploads:
@@ -285,9 +387,25 @@ class Uploads:
             region_name=s.get("region", "auto"),
         ), s
 
-    def put(self, path, attempt):
+    def put(self, path, attempt, provider=None):
         import mimetypes
 
+        if provider and provider.cap.get("direct_upload"):
+            ticket = provider.upload(path)
+            self.store.put(
+                "upload",
+                {
+                    "id": identifier(),
+                    "attempt": attempt,
+                    "provider": provider.name,
+                    "account": account(provider.settings),
+                    "media_url": ticket["media_url"],
+                    "expires": ticket["expires_at"],
+                    "upload_expires": ticket["upload_expires_at"],
+                    "deletable": False,
+                },
+            )
+            return ticket["media_url"]
         client, settings = self.client()
         key = f"openjutsu/{attempt}/{identifier()}{Path(path).suffix}"
         client.upload_file(
@@ -316,7 +434,7 @@ class Uploads:
         records = [
             r
             for r in self.store.list("upload")
-            if r["expires"] < time.time() and not r.get("deleted")
+            if r["expires"] < time.time() and not r.get("deleted") and r.get("storage")
         ]
         if not records:
             return
@@ -337,7 +455,10 @@ def make_quotes(store, secrets, job, native_parent=None, finish="upscale", upsca
         reason = None
         if not config.get("api_key"):
             reason = "Configure provider credentials"
-        elif not settings.get("storage", {}).get("bucket"):
+        elif not cap.get("direct_upload") and not all(
+            settings.get("storage", {}).get(k)
+            for k in ("bucket", "endpoint", "access_key", "secret_key")
+        ):
             reason = "Configure private media storage"
         elif Path(clip["path"]).stat().st_size > cap["max_mb"] * 1024 * 1024:
             reason = "Prepared clip exceeds provider upload limit"
@@ -345,10 +466,31 @@ def make_quotes(store, secrets, job, native_parent=None, finish="upscale", upsca
             reason = "Clip aspect ratio is outside provider limits"
         elif any(
             s["kind"] == "human"
-            and (not cap["portraits"] or not (s.get("portrait_asset") or "").startswith("asset://"))
+            and (
+                (name == "argolink" and not s.get("consent_confirmed"))
+                or (
+                    name != "argolink"
+                    and (
+                        not cap["portraits"]
+                        or not (s.get("portrait_asset") or "").startswith("asset://")
+                    )
+                )
+            )
             for s in job["recipe"]["subjects"]
         ):
-            reason = "Authorized portrait assets are required; reseller support is unverified"
+            reason = "Confirm portrait consent for ArgoLink; other routes require supported portrait enrollment"
+        elif (
+            name == "argolink"
+            and job["recipe"].get("argolink_mode", "reference") == "edit"
+            and any(s.get("references") for s in job["recipe"]["subjects"])
+        ):
+            reason = "Edit-plus-images contract is disputed; choose ArgoLink reference mode"
+        elif (
+            name == "argolink"
+            and job["recipe"].get("argolink_mode", "reference") == "reference"
+            and abs(m["duration"] - round(m["duration"])) > 0.001
+        ):
+            reason = "ArgoLink reference mode requires a whole-second clip"
         elif job["recipe"]["mode"] == "fast" and any(
             s["kind"] == "human" for s in job["recipe"]["subjects"]
         ):
@@ -366,10 +508,14 @@ def make_quotes(store, secrets, job, native_parent=None, finish="upscale", upsca
             refs = [
                 store.get("asset", ref)
                 for s in job["recipe"]["subjects"]
-                if s["kind"] != "human"
+                if s["kind"] != "human" or name != "byteplus"
                 for ref in s.get("references", [])
             ]
-            count = len(refs) + sum(s["kind"] == "human" for s in job["recipe"]["subjects"])
+            count = len(refs) + (
+                sum(s["kind"] == "human" for s in job["recipe"]["subjects"])
+                if name == "byteplus"
+                else 0
+            )
             if count > cap["max_images"]:
                 reason = f"At most {cap['max_images']} references are supported by this route"
             elif any(
@@ -428,6 +574,10 @@ def make_quotes(store, secrets, job, native_parent=None, finish="upscale", upsca
             "native": cap["native"],
             "parent": native_parent["id"] if native_parent else None,
             "pricing_checked": "2026-10-11",
+            "request_mode": job["recipe"].get("argolink_mode", "reference")
+            if name == "argolink"
+            else "edit",
+            "upload_retention_days": 7 if cap.get("direct_upload") else 1,
         }
         store.put("quote", q)
         quotes.append(q)

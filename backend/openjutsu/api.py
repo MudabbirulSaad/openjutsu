@@ -31,6 +31,7 @@ from .types import (
 
 class Budget(BaseModel):
     budget_usd: float = Field(ge=0, le=10000, allow_inf_nan=False)
+    generation_limit: int | None = Field(default=None, ge=1, le=100)
 
 
 class Settings(BaseModel):
@@ -114,6 +115,10 @@ def create_app(config=None, start_workers=True):
         ]
         busy = job["status"] in {"queued", "preparing", "generating", "exporting"}
         unknown = any(a["status"] in {"submitting", "unknown_submission"} for a in attempts)
+        limit_reached = (
+            bool(job.get("generation_limit"))
+            and sum(not a.get("parent") for a in attempts) >= job["generation_limit"]
+        )
         seconds = (
             artifacts.get("delivery", {}).get("metadata", {}).get("duration", 0)
             if job["status"] == "complete"
@@ -132,7 +137,10 @@ def create_app(config=None, start_workers=True):
                 and not missing
                 and engine.model_state["gpu"]["available"],
                 "approve": job["status"] == "review",
-                "generate": bool(job["approval"]) and not busy and not unknown,
+                "generate": bool(job["approval"])
+                and not busy
+                and not unknown
+                and not limit_reached,
                 "export": bool(job["preview_approval"]) and not busy and not unknown,
                 "cancel": busy and store.local_active(id),
             },
@@ -156,6 +164,7 @@ def create_app(config=None, start_workers=True):
                     "configured": bool(settings.get(k, {}).get("api_key")),
                     "native": v["native"],
                     "portraits": v["portraits"],
+                    "direct_upload": v.get("direct_upload", False),
                     "qualified": any(
                         q["provider"] == k and q["account"] == account(settings.get(k, {}))
                         for q in store.list("qualification")
@@ -238,7 +247,7 @@ def create_app(config=None, start_workers=True):
 
     @app.put("/api/jobs/{id}/budget")
     def budget(id: str, body: Budget):
-        store.budget(id, money(body.budget_usd))
+        store.budget(id, money(body.budget_usd), body.generation_limit)
         return view(id)
 
     preview_lock = threading.Lock()

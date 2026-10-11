@@ -85,3 +85,18 @@ def test_paid_operation_cannot_race_repreparation_or_use_stale_conditioning(prep
     s.update("job", job, {"status": "approved"})
     with pytest.raises(Conflict, match="quote"):
         s.reserve_attempt(job, 1, {**quote(job), "artifact": "different-clip"}, "operation-two")
+
+
+def test_one_generation_limit_survives_failure_revision_and_restart(prepared):
+    s, job = prepared
+    s.budget(job, money(10), generation_limit=1)
+    a = s.reserve_attempt(job, 1, quote(job), "one-authorized-generation")
+    s.update("attempt", a["id"], {"status": "failed"})
+    s.settle(a["id"], failed=True)
+    s.update("job", job, {"status": "approved"})
+    assert s.reserve_attempt(job, 1, quote(job), "one-authorized-generation")["id"] == a["id"]
+    reopened = Store(s.root)
+    with pytest.raises(Conflict, match="submission limit"):
+        reopened.reserve_attempt(job, 1, quote(job), "another-generation")
+    with pytest.raises(Conflict, match="tightened"):
+        reopened.budget(job, money(10), generation_limit=2)

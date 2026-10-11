@@ -17,7 +17,7 @@ A personal, local video preparation and generation studio. Prepare on your GPU, 
 - Ubuntu WSL2 on Windows, or Linux; Python 3.12, Git, FFmpeg/FFprobe, [uv 0.13.0](https://docs.astral.sh/uv/getting-started/installation/), `python3-venv`.
 - Node.js 22+ and pnpm 11.22.0 for the frontend build.
 - NVIDIA CUDA GPU for model preparation. Tested on RTX 4080 SUPER 16 GB; 64 GB host RAM, 48 GB available to WSL. Other GPUs and long clips need validation.
-- Own provider account and private S3-compatible storage for cloud generation. Local preprocessing needs neither.
+- Own provider account for cloud generation. BytePlus/Segmind also need private S3-compatible storage; ArgoLink uses direct uploads. Local preprocessing needs neither.
 
 The job database, cache, models and artifacts live on Linux, under `~/.local/share/openjutsu`. Import recordings from Windows through `/mnt/DRIVE/path`. Originals are copied immutably. Keep source recordings and full transcripts out of Git.
 
@@ -60,12 +60,12 @@ Model installation is explicit and separate from application installation. See [
 
 ## Four-stage workflow
 
-1. **Prepare:** import a video, trim a 4–30 second interval, choose Advanced/Fast/Combined, bind one or two references, and anchor subjects on the first frame. Use correction frames, point/box alternatives, original or timed custom speech, and optional local prompt assistance.
+1. **Prepare:** import a video, trim a 4–30 second interval, choose Advanced/Fast/Combined, bind up to three cast members, define tracking intervals, and anchor each interval. Use correction frames, point/box alternatives, original or timed custom speech, and optional local prompt assistance.
 2. **Review:** inspect synchronized original, mask, numerical-depth preview, composite and mesh artifacts. Paused review uses indexed frames. Listen to conditioning and final audio, then approve that exact revision.
 3. **Generate:** set a spending limit, configure eligible routes, and explicitly run a qualification pilot. Compare attempts and accept one preview. Every paid request has durable intent, reservation and provider task ID. Uncertain submissions require reconciliation.
 4. **Export:** choose original resolution, SeedVR2 1080p, explicit Real-ESRGAN fallback, or native 1080p from the original draft/account. The selected unpitched soundtrack is restored. Keep the native master, browser delivery and recipe provenance separately.
 
-Fast and Combined initially support one talking subject. Advanced supports up to two selected tracks. Mesh modes stop on tracking gaps; choosing Advanced or trimming the input is a useful alternative. Full-body references and whole-character prompts help address the body-replacement failure shown in the source video, but quality still needs human review.
+Fast and Combined initially support one talking subject. Advanced supports up to three cast tracks with separate intervals across camera changes. Mesh modes stop on tracking gaps; choosing Advanced or trimming the input is a useful alternative. Full-body references and whole-character prompts help address the body-replacement failure shown in the source video, but quality still needs human review.
 
 ## Checks
 

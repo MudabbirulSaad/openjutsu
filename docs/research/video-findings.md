@@ -28,7 +28,7 @@ Published estimates for 5s source + 5s output, 16:9, USD; not paid tests:
 
 | Route | Estimate | Limitation |
 |---|---:|---|
-| [ArgoLink 480p edit](https://argolink.io/en/models/seedance-2.5) | $0.523 | No native draft continuation; edit uses embedded audio and image references |
+| [ArgoLink 480p with video input](https://argolink.io/en/models/seedance-2.5) | $0.523 | No native draft continuation; multi-reference accepts conditioning video and photos |
 | [Segmind draft](https://www.segmind.com/models/seedance-2.5/pricing) + [final](https://www.segmind.com/models/seedance-2.5-draft-final/pricing) | $2.40 | Published final discount needs settled-charge validation |
 | [BytePlus draft + final](https://docs.byteplus.com/en/docs/modelark/model-pricing) | $4.02 | Native continuation retains input-video billing |
 | Enhancor | Unverified | Dashboard contract and current rates require verification |

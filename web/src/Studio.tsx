@@ -694,6 +694,24 @@ export function Studio({ connected }: { connected: boolean }) {
                 onChange={(e) => update({ prompt: e.target.value })}
               />
             </Field>
+            <Field
+              label="ArgoLink request mode"
+              hint="Reference mode supports video and photos. Edit-plus-images support is disputed in the provider documentation."
+            >
+              <select
+                value={recipe.argolink_mode || "reference"}
+                onChange={(e) =>
+                  update({
+                    argolink_mode: e.target.value as Recipe["argolink_mode"],
+                  })
+                }
+              >
+                <option value="reference">
+                  Multi-reference · video and photos
+                </option>
+                <option value="edit">Edit · video only</option>
+              </select>
+            </Field>
             <label className="check">
               <input
                 type="checkbox"
@@ -860,10 +878,10 @@ export function Studio({ connected }: { connected: boolean }) {
         <>
           <BudgetEditor
             job={job}
-            onSave={(value) =>
+            onSave={(value, attempts) =>
               action.mutate({
                 path: `/jobs/${id}/budget`,
-                body: { budget_usd: value },
+                body: { budget_usd: value, generation_limit: attempts },
                 method: "PUT",
               })
             }

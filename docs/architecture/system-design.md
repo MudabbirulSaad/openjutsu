@@ -27,7 +27,9 @@ Attempts: submitting → pending → succeeded / failed; ambiguous submission �
 
 Soundtrack extraction uses the immutable source interval, not the lossy browser proxy. It produces a timing-aligned PCM copy for separation and final restoration. Pitch changes apply only to conditioning vocals. The immutable source also retains its original compressed soundtrack.
 
-Runtime data defaults to ~/.local/share/openjutsu on Linux. The Windows source is copied on import. Models are separate downloads. Public routes resolve artifact IDs rather than arbitrary filesystem paths. The API binds localhost and checks browser origins on mutations. Credentials are stored in a permission-restricted runtime file, omitted from responses and job bundles. Only explicitly reviewed conditioning media and identity references are uploaded through private S3-compatible storage.
+Runtime data defaults to ~/.local/share/openjutsu on Linux. The Windows source is copied on import. Models are separate downloads. Public routes resolve artifact IDs rather than arbitrary filesystem paths. The API binds localhost and checks browser origins on mutations. Credentials are stored in a permission-restricted runtime file, omitted from responses and job bundles. Only reviewed conditioning media and identity references are uploaded, through private S3-compatible storage for BytePlus/Segmind or provider-managed seven-day ArgoLink tickets. ArgoLink has no documented immediate deletion API.
+
+See [shot-aware preparation](shot-aware-preparation.md) for interval tracking and empty-frame review. ArgoLink uses consent-confirmed references in multi-reference mode; policy eligibility remains separate from quality qualification. Per-project generation limits count durable intents across failures and restarts.
 
 ## Acceptance
 

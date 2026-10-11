@@ -95,6 +95,7 @@ class CreateJob(Strict):
     source: str
     name: str = Field(default="Untitled clip", max_length=150)
     budget_usd: float = Field(default=0, ge=0, le=10000)
+    generation_limit: int | None = Field(default=None, ge=1, le=100)
     recipe: Recipe = Field(default_factory=Recipe)
 
 

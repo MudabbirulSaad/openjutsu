@@ -101,6 +101,11 @@ export function Settings() {
       <section>
         <h2>Private temporary media storage</h2>
         <p className="small">
+          ArgoLink uses its own direct uploads and needs no S3 bucket. Its media
+          links remain available for seven days; immediate deletion is not
+          documented.
+        </p>
+        <p className="small">
           Use a private S3-compatible bucket. Access links expire after one
           hour; uploaded objects are removed after 24 hours while the
           application is running. Configure a bucket lifecycle rule as a backup.

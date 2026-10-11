@@ -462,18 +462,22 @@ class Engine:
                 payload = provider.payload(a["recipe_snapshot"], "", [], parent)
             else:
                 clip = self.store.get("artifact", a["conditioning"])
-                video = self.uploads.put(clip["path"], a["id"])
+                video = self.uploads.put(clip["path"], a["id"], provider)
                 refs = []
-                for s in a["recipe_snapshot"]["subjects"]:
+                for s in sorted(a["recipe_snapshot"]["subjects"], key=lambda s: s["id"]):
                     if s["kind"] == "human" and a["provider"] == "byteplus":
                         refs.append(s["portrait_asset"])
                     else:
                         for id in s["references"]:
                             asset = self.store.get("asset", id)
                             refs.append(
-                                self.uploads.put(asset.get("reference", asset["path"]), a["id"])
+                                self.uploads.put(
+                                    asset.get("reference", asset["path"]), a["id"], provider
+                                )
                             )
-                payload = provider.payload(a["recipe_snapshot"], video, refs)
+                payload = provider.payload(
+                    a["recipe_snapshot"], video, refs, media=clip["metadata"]
+                )
             submitted = True
             remote = provider.submit(payload, native=bool(parent))
             self.store.update("attempt", a["id"], {"status": "pending", "remote_id": remote})
@@ -549,6 +553,7 @@ class Engine:
                         if result.get("draft_id")
                         else None,
                         "usage": result.get("usage"),
+                        "usage_estimate_usd": result.get("usage_estimate_usd"),
                         "downloaded": True,
                     },
                 )

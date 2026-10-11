@@ -87,6 +87,7 @@ export type Job = {
   approval: unknown;
   preview_approval: string | null;
   budget_usd: number;
+  generation_limit?: number | null;
   spent_usd: number;
   reserved_usd: number;
   cost_per_accepted_second: number | null;
@@ -130,6 +131,8 @@ export type System = {
   }[];
 };
 export type Quote = {
+  request_mode?: string;
+  upload_retention_days?: number;
   id: string;
   provider: string;
   eligible: boolean;

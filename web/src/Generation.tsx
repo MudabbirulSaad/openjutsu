@@ -9,9 +9,12 @@ export function BudgetEditor({
   onSave,
 }: {
   job: Job;
-  onSave: (n: number) => void;
+  onSave: (n: number, attempts: number | null) => void;
 }) {
   const [limit, setLimit] = useState(job.budget_usd);
+  const [attempts, setAttempts] = useState<number | null>(
+    job.generation_limit || null,
+  );
   return (
     <section>
       <h2>Spending limit</h2>
@@ -36,12 +39,29 @@ export function BudgetEditor({
           onChange={(e) => setLimit(Number(e.target.value))}
         />
       </Field>
+      <Field
+        label="Generation submission limit"
+        hint="Optional fixed count of generation intents, including failed submissions. Once set it can only be tightened. Local exports do not count."
+      >
+        <input
+          type="number"
+          min={1}
+          max={job.generation_limit || 100}
+          value={attempts || ""}
+          placeholder="Unlimited"
+          onChange={(e) =>
+            setAttempts(e.target.value ? Number(e.target.value) : null)
+          }
+        />
+      </Field>
       <Button
         size="small"
         disabled={
-          limit === job.budget_usd || limit < job.spent_usd + job.reserved_usd
+          (limit === job.budget_usd &&
+            attempts === (job.generation_limit || null)) ||
+          limit < job.spent_usd + job.reserved_usd
         }
-        onClick={() => onSave(limit)}
+        onClick={() => onSave(limit, attempts)}
       >
         Save limit
       </Button>
@@ -104,7 +124,7 @@ export function Generation({
               {quote.reason ||
                 (quote.native
                   ? "Draft with native continuation"
-                  : "480p edit · local upscale")}
+                  : `480p ${quote.request_mode || "edit"} · local upscale`)}
             </small>
           </span>
           <span>
@@ -146,6 +166,19 @@ export function Generation({
         Submit {q?.native ? "draft" : "480p preview"}
       </Button>
       <p className="small">Paid requests are never retried automatically.</p>
+      {job.generation_limit && (
+        <p className="small">
+          Submission limit: {job.attempts.filter((a) => !a.parent).length} /{" "}
+          {job.generation_limit}. Local upscaling and export remain available.
+        </p>
+      )}
+      {q?.provider === "argolink" && (
+        <p className="small">
+          {q.request_mode || "reference"} mode · reviewed media uses ArgoLink
+          direct uploads, available for seven days. Immediate deletion is not
+          exposed by its documented API.
+        </p>
+      )}
     </section>
   );
 }

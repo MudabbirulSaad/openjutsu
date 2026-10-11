@@ -121,6 +121,7 @@ class Store:
             "status": "imported",
             "stage": "prepare",
             "budget": money(request.budget_usd),
+            "generation_limit": request.generation_limit,
             "spent": 0,
             "reserved": 0,
             "approval": None,
@@ -136,12 +137,16 @@ class Store:
             self._event(db, job["id"], "created")
         return job
 
-    def budget(self, id, limit):
+    def budget(self, id, limit, generation_limit=None):
         with self.transaction() as db:
             job = self._get(db, "job", id)
             if limit < job["spent"] + job["reserved"]:
                 raise Conflict("Limit cannot be below existing spend and reservations")
             job["budget"] = limit
+            if generation_limit is not None:
+                if job.get("generation_limit") and generation_limit > job["generation_limit"]:
+                    raise Conflict("An existing generation limit can only be tightened")
+                job["generation_limit"] = generation_limit
             self._put(db, "job", job)
             self._event(db, id, "budget", limit=limit)
 
@@ -213,6 +218,13 @@ class Store:
                 return a
             job = self._get(db, "job", job_id)
             self.check_revision(job, revision)
+            if not parent and job.get("generation_limit"):
+                count = db.execute(
+                    "SELECT count(*) FROM records WHERE kind='attempt' AND json_extract(data,'$.job')=? AND json_extract(data,'$.parent') IS NULL",
+                    (job_id,),
+                ).fetchone()[0]
+                if count >= job["generation_limit"]:
+                    raise Conflict("This project's generation submission limit has been reached")
             if (
                 quote["job"] != job_id
                 or quote["revision"] != revision
