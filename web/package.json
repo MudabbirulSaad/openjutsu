@@ -2,6 +2,7 @@
   "name": "openjutsu-studio",
   "version": "0.1.0-alpha.1",
   "private": true,
+  "packageManager": "pnpm@11.22.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",

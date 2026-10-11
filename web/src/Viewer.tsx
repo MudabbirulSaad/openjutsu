@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react";
 import {
   Pause,
   Play,
@@ -7,8 +6,9 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { Button } from "./ui";
+import { useEffect, useRef, useState } from "react";
 import { type Point, timecode } from "./api";
+import { Button } from "./ui";
 export function normalizedPoint(
   clientX: number,
   clientY: number,
@@ -56,19 +56,24 @@ export function Viewer({
   const first = useRef<HTMLVideoElement>(null),
     second = useRef<HTMLVideoElement>(null);
   const plane = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width, height });
+  useEffect(() => setDimensions({ width, height }), [url, width, height]);
   const [contained, setContained] = useState({ width: 0, height: 0 });
   useEffect(() => {
     if (!plane.current) return;
     const observer = new ResizeObserver(([entry]) => {
       const scale = Math.min(
-        entry.contentRect.width / width,
-        entry.contentRect.height / height,
+        entry.contentRect.width / dimensions.width,
+        entry.contentRect.height / dimensions.height,
       );
-      setContained({ width: width * scale, height: height * scale });
+      setContained({
+        width: dimensions.width * scale,
+        height: dimensions.height * scale,
+      });
     });
     observer.observe(plane.current);
     return () => observer.disconnect();
-  }, [width, height, annotate, compare]);
+  }, [dimensions, annotate, compare]);
   const [playing, setPlaying] = useState(false),
     [muted, setMuted] = useState(false),
     [error, setError] = useState("");
@@ -129,6 +134,15 @@ export function Viewer({
         playsInline
         preload="metadata"
         muted={secondary || muted}
+        onLoadedMetadata={
+          secondary
+            ? undefined
+            : (e) =>
+                setDimensions({
+                  width: e.currentTarget.videoWidth,
+                  height: e.currentTarget.videoHeight,
+                })
+        }
         onPlay={
           secondary
             ? undefined
@@ -168,6 +182,11 @@ export function Viewer({
           }}
           onLoad={(e) => {
             e.currentTarget.style.display = "block";
+            if (!secondary)
+              setDimensions({
+                width: e.currentTarget.naturalWidth,
+                height: e.currentTarget.naturalHeight,
+              });
           }}
         />
       )}
@@ -183,8 +202,8 @@ export function Viewer({
               e.clientX,
               e.clientY,
               e.currentTarget.getBoundingClientRect(),
-              width,
-              height,
+              dimensions.width,
+              dimensions.height,
             );
             if (p) onPoint(p);
           }}

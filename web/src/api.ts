@@ -61,7 +61,7 @@ export type Attempt = {
   draft_expires?: number;
   artifact?: string;
   preview?: string;
-  actual_cost?: number;
+  actual?: number | null;
   reservation: number;
   settled?: boolean;
   pilot: boolean;
@@ -87,7 +87,12 @@ export type Job = {
   reserved_usd: number;
   required_models: string[];
   available_actions: Record<string, boolean>;
-  progress?: { stage: string; progress: number };
+  progress?: {
+    stage: string;
+    completed?: number;
+    total?: number;
+    cached?: boolean;
+  };
   error?: string;
 };
 export type Model = {

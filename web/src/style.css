@@ -171,8 +171,8 @@ input::placeholder {
   color: var(--text);
   white-space: normal;
   transition:
-    background 0.15s,
-    border-color 0.15s;
+    border-color 0.15s,
+    filter 0.15s;
 }
 .button:hover:not(:disabled) {
   background: var(--subtle);

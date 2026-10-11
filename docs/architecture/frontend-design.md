@@ -20,6 +20,8 @@ Keyboard-accessible trimming, frame stepping, annotation coordinates, labelled r
 
 The guided studio uses `/api/jobs/{id}` as its state authority and a single ordered `/api/events` stream to refresh queries. Reconnection falls back to read-only polling. Mutations have retries disabled; paid controls are latched while an operation is pending. The server validates revision, approval, quote expiry, account and reservation atomically.
 
+Source modules separate the application shell, Projects, Settings, Studio, generation controls, annotation/audio controls, viewer, semantic primitives and API types. The viewer owns playback and coordinate transforms; the studio owns unsaved recipe drafts; backend operations own durable state. No provider key is retained in browser storage.
+
 Unsaved recipes are retained in browser local storage with their base revision. A stale draft remains visible and cannot be submitted. Settings submit secrets directly to the backend and never read them back. Clip media uses normalized browser copies; paused review requests indexed PNG frames. Click coordinates exclude letterbox regions, with numeric point and box controls as keyboard alternatives.
 
 UI availability means installed dependencies and files, not measured quality. Provider qualification requires a settled pilot and human scores. The default spending limit is zero. The studio shows uncertain submissions and provides dashboard-based reconciliation rather than an automatic retry.

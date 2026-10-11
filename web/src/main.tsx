@@ -1,10 +1,10 @@
+import "@fontsource-variable/inter";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import "@fontsource-variable/inter";
-import "./style.css";
 import { App } from "./App";
+import "./style.css";
 const client = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, staleTime: 3000, refetchOnWindowFocus: true },
