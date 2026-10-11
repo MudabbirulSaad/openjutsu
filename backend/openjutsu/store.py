@@ -192,6 +192,7 @@ class Store:
                 if a["job"] != id or a["revision"] != revision or a["status"] != "succeeded":
                     raise Conflict("Select a successful preview from this revision")
                 job["preview_approval"] = attempt
+                job["stage"] = "export"
             else:
                 if job["status"] != "review" or "conditioning" not in job["artifacts"]:
                     raise Conflict("Prepare and review the conditioning clip first")

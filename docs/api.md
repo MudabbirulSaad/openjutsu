@@ -36,4 +36,6 @@ Job responses include status, revision, artifacts, attempts, readiness, availabl
 
 `POST /api/jobs` and `PUT /api/jobs/{id}/budget` accept optional `generation_limit` (1–100). A set limit cannot be relaxed; omission preserves it. `available_actions.generate` reflects the limit. Quotes expose `request_mode` and `upload_retention_days`; attempts expose `usage_estimate_usd` separately from reconciled charges. `/api/system` reports per-provider `direct_upload` without exposing credentials.
 
+Selecting a successful preview advances the durable job stage to `export`, including when approval comes from the CLI or another API client. The browser's route does not own the workflow state.
+
 Recipe bundles contain settings, artifact hashes, media metadata and producing model/stage provenance. They omit credentials and portrait asset identifiers. Reusable templates clear references, annotations, source-specific intervals, portrait consent and custom audio; bind and authorize references for the new source. Recipes reproduce settings, not identical stochastic cloud results.

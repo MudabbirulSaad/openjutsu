@@ -59,6 +59,15 @@ def test_settlement_is_idempotent(prepared):
     assert s.get("job", job)["reserved"] == 0
 
 
+def test_selected_preview_advances_backend_workflow_for_cli_clients(prepared):
+    s, job = prepared
+    a = s.reserve_attempt(job, 1, quote(job), "selected-preview")
+    s.update("attempt", a["id"], {"status": "succeeded"})
+    s.update("job", job, {"status": "preview"})
+    approved = s.approve(job, 1, a["id"])
+    assert approved["stage"] == "export" and approved["preview_approval"] == a["id"]
+
+
 def test_recipe_invalidates_approval_and_stale_revision(prepared):
     s, job = prepared
     old = s.get("job", job)
