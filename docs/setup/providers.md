@@ -8,6 +8,8 @@ No credential, paid cloud result, or provider qualification is shipped. The adap
 4. Set a project spending limit and an account spending cap at the provider. Quotes include reference-video billing, output generation, and a reservation margin. Reservations are planning controls, not a guarantee that a provider cannot bill more.
 5. Explicitly select a **paid qualification pilot**. Check settled charges, authorization policy, and quality. Record identity, motion and temporal stability scores ≥4/5 with no subject swaps or visible sync failures. Only then does that profile become eligible for normal generation.
 
+The generation inspector quotes your finished-output plan: local upscale, native continuation, or original resolution. Native estimates include draft and final API costs; local upscaling shows API cost separately from unpriced local energy/time. Routes are sorted by the finished estimate among eligible, qualified profiles. Rejected attempts and prior spend remain in the project ledger.
+
 | Provider | Implemented edit contract | Native continuation | Portrait handling |
 |---|---|---|---|
 | [BytePlus](https://docs.byteplus.com/en/docs/modelark/seedance-2-5) | ModelArk asynchronous task; 480p draft; adaptive edit duration | Original draft ID to 1080p, original account | [Authorized portrait asset route](https://docs.byteplus.com/en/docs/modelark/seedance-portrait-asset-guide); enroll upstream and enter `asset://…` |

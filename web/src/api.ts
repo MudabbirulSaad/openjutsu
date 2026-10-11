@@ -85,6 +85,8 @@ export type Job = {
   budget_usd: number;
   spent_usd: number;
   reserved_usd: number;
+  cost_per_accepted_second: number | null;
+  billing_pending: boolean;
   required_models: string[];
   available_actions: Record<string, boolean>;
   progress?: {
@@ -130,6 +132,7 @@ export type Quote = {
   qualified: boolean;
   reason: string | null;
   estimate: number;
+  finished_estimate: number;
   reserve: number;
   native: boolean;
   expires: number;

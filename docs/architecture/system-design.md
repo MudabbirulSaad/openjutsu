@@ -25,6 +25,8 @@ Attempts: submitting → pending → succeeded / failed; ambiguous submission �
 
 ## Data and privacy
 
+Soundtrack extraction uses the immutable source interval, not the lossy browser proxy. It produces a timing-aligned PCM copy for separation and final restoration. Pitch changes apply only to conditioning vocals. The immutable source also retains its original compressed soundtrack.
+
 Runtime data defaults to ~/.local/share/openjutsu on Linux. The Windows source is copied on import. Models are separate downloads. Public routes resolve artifact IDs rather than arbitrary filesystem paths. The API binds localhost and checks browser origins on mutations. Credentials are stored in a permission-restricted runtime file, omitted from responses and job bundles. Only explicitly reviewed conditioning media and identity references are uploaded through private S3-compatible storage.
 
 ## Acceptance

@@ -75,3 +75,13 @@ def test_overspending_rejected(prepared):
     q["reserve"] = money(2)
     with pytest.raises(Conflict, match="spending"):
         s.reserve_attempt(job, 1, q, "operation-one")
+
+
+def test_paid_operation_cannot_race_repreparation_or_use_stale_conditioning(prepared):
+    s, job = prepared
+    s.update("job", job, {"status": "preparing"})
+    with pytest.raises(Conflict):
+        s.reserve_attempt(job, 1, quote(job), "operation-one")
+    s.update("job", job, {"status": "approved"})
+    with pytest.raises(Conflict, match="quote"):
+        s.reserve_attempt(job, 1, {**quote(job), "artifact": "different-clip"}, "operation-two")

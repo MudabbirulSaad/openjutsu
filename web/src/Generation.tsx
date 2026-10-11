@@ -57,11 +57,15 @@ export function Generation({
   quotes,
   disabled,
   onGenerate,
+  finish,
+  onFinish,
 }: {
   job: Job;
   quotes: Quote[];
   disabled: boolean;
   onGenerate: (q: Quote, pilot: boolean) => void;
+  finish: string;
+  onFinish: (value: string) => void;
 }) {
   const [selected, setSelected] = useState(""),
     [pilot, setPilot] = useState(false);
@@ -72,6 +76,13 @@ export function Generation({
   return (
     <section>
       <h2>Generation route</h2>
+      <Field label="Finished output plan">
+        <select value={finish} onChange={(e) => onFinish(e.target.value)}>
+          <option value="upscale">1080p · local upscale</option>
+          <option value="native">1080p · native continuation</option>
+          <option value="original">Original preview resolution</option>
+        </select>
+      </Field>
       {!job.approval && (
         <p className="small">Approve the reviewed preparation first.</p>
       )}
@@ -96,7 +107,10 @@ export function Generation({
                   : "480p edit · local upscale")}
             </small>
           </span>
-          <span>{usd(quote.estimate)}</span>
+          <span>
+            {usd(quote.finished_estimate)}
+            <small>finished API</small>
+          </span>
         </label>
       ))}
       {q && !q.qualified && (
@@ -111,9 +125,10 @@ export function Generation({
       )}
       {q && (
         <p className="small">
-          Estimate {usd(q.estimate)} · reservation {usd(q.reserve / 1e6)}.
-          Native continuation is separately quoted. Creative retries increase
-          the finished cost.
+          Preview {usd(q.estimate)} · reservation {usd(q.reserve / 1e6)} ·
+          finished API estimate {usd(q.finished_estimate)}. Local time/energy
+          and creative retries are additional. Native continuation needs a fresh
+          quote and separate qualification.
         </p>
       )}
       <Button
@@ -341,7 +356,7 @@ export function ExportOptions({
     pilot?: boolean,
   ) => void;
 }) {
-  const [route, setRoute] = useState("original"),
+  const [route, setRoute] = useState("upscale"),
     [upscaler, setUpscaler] = useState("seedvr2"),
     [pilot, setPilot] = useState(false);
   const q = native.find((q) => q.eligible);

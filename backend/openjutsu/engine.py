@@ -52,7 +52,7 @@ class Engine:
             required.extend(["depth", r["segmentation"]])
         if r["mode"] != "advanced":
             required.append("mesh")
-        if r["transcribe"]:
+        if r["transcribe"] and (source["metadata"]["has_audio"] or r["audio"] == "custom"):
             required.append("whisper")
         if r["describe"]:
             required.append("describe")
@@ -129,6 +129,7 @@ class Engine:
             "file": model_stamp,
             "sha256": model_info.get("checkpoint_sha256"),
             "package": model_info.get("package_version"),
+            "source_commit": model_info.get("source_commit"),
         }
         key = fingerprint(
             {
@@ -229,6 +230,7 @@ class Engine:
                     "parameters": parameters,
                     "model": model,
                     "model_version": model_stamp,
+                    "inputs": dependencies,
                 }
             )
         )
@@ -267,7 +269,16 @@ class Engine:
             {"start": r["start"], "end": r["end"]},
         )
         clip = paths["normalized"]
-        paths.update(self.run_stage(job, "audio", clip, {}))
+        paths.update(
+            self.run_stage(
+                job,
+                "audio",
+                self.store.get("asset", job["source"])["path"],
+                {"start": r["start"], "duration": r["end"] - r["start"]},
+                trim_start=r["start"],
+                duration=r["end"] - r["start"],
+            )
+        )
         if "original_audio" in paths and (r["audio"] == "original" or r["custom_mix_background"]):
             paths.update(self.run_stage(job, "vocals", paths["original_audio"], {}))
         if r["audio"] == "custom":
@@ -344,8 +355,23 @@ class Engine:
         source = self.store.get("artifact", a["artifact"])["path"]
         paths = {}
         if data["route"] == "upscale":
+            batch = int(
+                os.environ.get(
+                    "OPENJUTSU_SEED_BATCH_SIZE",
+                    "13" if self.model_state["gpu"].get("total_mb", 0) >= 15000 else "5",
+                )
+            )
+            if batch not in {5, 9, 13}:
+                raise Conflict("Choose a tested temporal batch size: 5, 9 or 13")
+            options = {"batch_size": batch} if data["upscaler"] == "seedvr2" else {}
             paths.update(
-                self.run_stage(job, data["upscaler"], source, {"upscaler": data["upscaler"]})
+                self.run_stage(
+                    job,
+                    data["upscaler"],
+                    source,
+                    {"upscaler": data["upscaler"], **options},
+                    **options,
+                )
             )
             source = paths["upscaled"]
         soundtrack = (
@@ -359,11 +385,11 @@ class Engine:
                 job,
                 k,
                 p,
-                {
-                    "upscale": "upscaled 1080p",
-                    "native": "native 1080p continuation",
-                    "original": "original generation",
-                }[data["route"]],
+                "upscaled 1080p"
+                if data["route"] == "upscale"
+                else "native 1080p continuation"
+                if data["route"] == "native" or a.get("parent")
+                else "original generation",
             )["id"]
             for k, p in paths.items()
         }
@@ -424,15 +450,14 @@ class Engine:
             if account(settings) != a["account"]:
                 raise Rejected("Restore the original provider account credentials")
             provider = Provider(a["provider"], settings)
-            job = self.store.get("job", a["job"])
             parent = self.store.get("attempt", a["parent"]) if a["parent"] else None
             if parent:
-                payload = provider.payload(job["recipe"], "", [], parent)
+                payload = provider.payload(a["recipe_snapshot"], "", [], parent)
             else:
-                clip = self.store.get("artifact", job["artifacts"]["conditioning"])
+                clip = self.store.get("artifact", a["conditioning"])
                 video = self.uploads.put(clip["path"], a["id"])
                 refs = []
-                for s in job["recipe"]["subjects"]:
+                for s in a["recipe_snapshot"]["subjects"]:
                     if s["kind"] == "human" and a["provider"] == "byteplus":
                         refs.append(s["portrait_asset"])
                     else:
@@ -441,7 +466,7 @@ class Engine:
                             refs.append(
                                 self.uploads.put(asset.get("reference", asset["path"]), a["id"])
                             )
-                payload = provider.payload(job["recipe"], video, refs)
+                payload = provider.payload(a["recipe_snapshot"], video, refs)
             submitted = True
             remote = provider.submit(payload, native=bool(parent))
             self.store.update("attempt", a["id"], {"status": "pending", "remote_id": remote})

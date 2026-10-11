@@ -57,7 +57,7 @@ def test_rotation_and_variable_timestamps_normalize_to_exact_frames(tmp_path):
             "-i",
             "testsrc2=size=320x180:rate=30:duration=6",
             "-vf",
-            "select='not(mod(n,3))',setpts=N/(10*TB)",
+            "select='if(lt(t,3),not(mod(n,2)),not(mod(n,3)))'",
             "-fps_mode",
             "vfr",
             "-c:v",

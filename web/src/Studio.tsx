@@ -17,6 +17,7 @@ import {
   api,
   content,
   timecode,
+  usd,
   upload,
   type Job,
   type Point,
@@ -150,9 +151,10 @@ export function Studio({ connected }: { connected: boolean }) {
       },
     );
   };
+  const [finish, setFinish] = useState("upscale");
   const quotes = useQuery({
-    queryKey: ["quotes", id, job?.revision, job?.status],
-    queryFn: () => api<Quote[]>(`/jobs/${id}/quotes`),
+    queryKey: ["quotes", id, job?.revision, job?.status, finish],
+    queryFn: () => api<Quote[]>(`/jobs/${id}/quotes?finish=${finish}`),
     enabled: stage === "generate" && !!job?.approval,
     refetchInterval: 60000,
   });
@@ -748,6 +750,8 @@ export function Studio({ connected }: { connected: boolean }) {
           />
           <Generation
             job={job}
+            finish={finish}
+            onFinish={setFinish}
             quotes={quotes.data || []}
             disabled={unavailable || !job.available_actions.generate}
             onGenerate={(quote, pilot) =>
@@ -827,8 +831,29 @@ export function Studio({ connected }: { connected: boolean }) {
               })
             }
           />
+          {job.attempts.some((a) => a.parent) && (
+            <Attempts
+              job={job}
+              selected={activeAttempt?.id || ""}
+              onSelect={setAttempt}
+              onReconcile={(aid, body) =>
+                action.mutate({ path: `/attempts/${aid}/reconcile`, body })
+              }
+              onQualify={(provider, body) =>
+                action.mutate({ path: `/providers/${provider}/qualify`, body })
+              }
+            />
+          )}
           <section>
             <h2>Deliverables</h2>
+            {job.cost_per_accepted_second !== null && (
+              <p className="small">
+                Settled API cost per accepted second:{" "}
+                {usd(job.cost_per_accepted_second)}
+                {job.billing_pending ? " · charges remain unsettled" : ""}.
+                Includes all attempts; local energy/time is additional.
+              </p>
+            )}
             {["master", "delivery"].map((k) =>
               artifacts[k] ? (
                 <a
@@ -986,7 +1011,13 @@ export function Studio({ connected }: { connected: boolean }) {
           />
           <footer className="workspace-footer">
             <div>
-              <DepthContour frozen={playing || !!system.data?.worker_active} />
+              <DepthContour
+                frozen={
+                  playing ||
+                  !!system.data?.worker_active ||
+                  ["queued", "preparing", "exporting"].includes(job.status)
+                }
+              />
               <span
                 className="worker-dot"
                 data-active={system.data?.worker_active}

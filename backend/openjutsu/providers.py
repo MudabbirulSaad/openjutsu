@@ -11,6 +11,7 @@ CAPABILITIES = {
         "native": True,
         "portraits": True,
         "max_mb": 200,
+        "max_images": 9,
         "base": "https://ark.ap-southeast.bytepluses.com/api/v3",
         "model": "dreamina-seedance-2-5-260628",
     },
@@ -19,12 +20,14 @@ CAPABILITIES = {
         "portraits": False,
         "max_mb": 200,
         "base": "https://api.segmind.com/v2",
+        "max_images": 9,
         "model": "seedance-2.5",
     },
     "argolink": {
         "native": False,
         "portraits": False,
         "max_mb": 100,
+        "max_images": 30,
         "base": "https://argolink.io/v1",
         "model": "seedance-2.5",
     },
@@ -324,7 +327,7 @@ class Uploads:
                 self.store.update("upload", r["id"], {"deleted": True})
 
 
-def make_quotes(store, secrets, job, native_parent=None):
+def make_quotes(store, secrets, job, native_parent=None, finish="upscale", upscaler_ready=True):
     clip = store.get("artifact", job["artifacts"]["conditioning"])
     m = clip["metadata"]
     settings = secrets.read()
@@ -359,7 +362,31 @@ def make_quotes(store, secrets, job, native_parent=None):
                 or (native_parent["draft_expires"] or 0) <= time.time()
             ):
                 reason = "Native draft continuation is unavailable or expired"
+        if not native_parent:
+            refs = [
+                store.get("asset", ref)
+                for s in job["recipe"]["subjects"]
+                if s["kind"] != "human"
+                for ref in s.get("references", [])
+            ]
+            count = len(refs) + sum(s["kind"] == "human" for s in job["recipe"]["subjects"])
+            if count > cap["max_images"]:
+                reason = f"At most {cap['max_images']} references are supported by this route"
+            elif any(
+                Path(a.get("reference", a["path"])).stat().st_size > 20 * 1024 * 1024 for a in refs
+            ):
+                reason = "A reviewed reference image exceeds the 20 MiB route limit"
         cost = estimate(name, m["duration"], m["width"], m["height"], bool(native_parent))
+        if not native_parent:
+            if finish == "native" and not cap["native"]:
+                reason = "This route cannot produce native HD from the same draft"
+            elif finish == "upscale" and not upscaler_ready:
+                reason = "Install a local upscaler, or choose native/original output"
+        final_cost = (
+            estimate(name, m["duration"], m["width"], m["height"], True)
+            if finish == "native" and not native_parent and cap["native"]
+            else 0
+        )
         qualification = next(
             (
                 q
@@ -371,16 +398,30 @@ def make_quotes(store, secrets, job, native_parent=None):
             ),
             None,
         )
+        if (
+            finish == "native"
+            and not native_parent
+            and not any(
+                q["provider"] == name
+                and q["account"] == account(config)
+                and q.get("profile") == qualification_profile(name, job["recipe"], True)
+                for q in store.list("qualification")
+            )
+        ):
+            qualification = None
         q = {
             "id": identifier(),
             "job": job["id"],
             "revision": job["revision"],
+            "artifact": clip["id"],
             "provider": name,
             "account": account(config),
             "eligible": not reason,
             "qualified": qualification is not None,
             "reason": reason or (None if qualification else "Qualification pilot required"),
             "estimate": round(cost, 6),
+            "finished_estimate": round(cost + final_cost, 6),
+            "finish": "native" if native_parent else finish,
             "reserve": money(round(cost * 1.2 + 0.05, 6)),
             "currency": "USD",
             "expires": time.time() + 600,
@@ -390,4 +431,6 @@ def make_quotes(store, secrets, job, native_parent=None):
         }
         store.put("quote", q)
         quotes.append(q)
-    return sorted(quotes, key=lambda q: (not q["eligible"], not q["qualified"], q["estimate"]))
+    return sorted(
+        quotes, key=lambda q: (not q["eligible"], not q["qualified"], q["finished_estimate"])
+    )

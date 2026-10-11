@@ -4,6 +4,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -113,6 +114,11 @@ def create_app(config=None, start_workers=True):
         ]
         busy = job["status"] in {"queued", "preparing", "generating", "exporting"}
         unknown = any(a["status"] in {"submitting", "unknown_submission"} for a in attempts)
+        seconds = (
+            artifacts.get("delivery", {}).get("metadata", {}).get("duration", 0)
+            if job["status"] == "complete"
+            else 0
+        )
         return {
             **job,
             "source_asset": public_record(store.get("asset", job["source"])),
@@ -128,11 +134,13 @@ def create_app(config=None, start_workers=True):
                 "approve": job["status"] == "review",
                 "generate": bool(job["approval"]) and not busy and not unknown,
                 "export": bool(job["preview_approval"]) and not busy and not unknown,
-                "cancel": busy,
+                "cancel": busy and store.local_active(id),
             },
             "budget_usd": job["budget"] / 1e6,
             "spent_usd": job["spent"] / 1e6,
             "reserved_usd": job["reserved"] / 1e6,
+            "cost_per_accepted_second": job["spent"] / 1e6 / seconds if seconds else None,
+            "billing_pending": any(not a.get("settled") for a in attempts),
         }
 
     @app.get("/api/system")
@@ -277,14 +285,25 @@ def create_app(config=None, start_workers=True):
         return view(id)
 
     @app.get("/api/jobs/{id}/quotes")
-    def quotes(id: str, parent: str | None = None):
+    def quotes(
+        id: str,
+        parent: str | None = None,
+        finish: Literal["upscale", "native", "original"] = "upscale",
+    ):
         j = store.get("job", id)
         if "conditioning" not in j["artifacts"]:
             return []
         a = store.get("attempt", parent) if parent else None
         if a and a["job"] != id:
             raise Conflict("Attempt belongs to another job")
-        return [public_record(q) for q in make_quotes(store, engine.secrets, j, a)]
+        upscaler_ready = any(
+            engine.model_state["models"].get(name, {}).get("ready")
+            for name in ("seedvr2", "realesrgan")
+        )
+        return [
+            public_record(q)
+            for q in make_quotes(store, engine.secrets, j, a, finish, upscaler_ready)
+        ]
 
     @app.post("/api/jobs/{id}/previews")
     def preview(id: str, body: PreviewRequest):
@@ -323,6 +342,10 @@ def create_app(config=None, start_workers=True):
 
     @app.post("/api/jobs/{id}/cancel")
     def cancel(id: str):
+        if not store.local_active(id):
+            raise Conflict(
+                "No active local task; submitted remote requests continue reconciliation"
+            )
         store.update("job", id, {"cancel": True})
         return view(id)
 
@@ -424,7 +447,16 @@ def create_app(config=None, start_workers=True):
             {
                 "version": 1,
                 "name": j["name"],
+                "export": {
+                    "route": j.get("export_route"),
+                    "accepted_attempt": j.get("preview_approval"),
+                },
                 "recipe": recipe,
+                "source": {
+                    k: v
+                    for k, v in store.get("asset", j["source"]).items()
+                    if k in {"hash", "metadata", "name"}
+                },
                 "artifacts": [
                     {
                         "kind": a["kind"],
@@ -435,6 +467,7 @@ def create_app(config=None, start_workers=True):
                         "model": a.get("model"),
                         "model_version": a.get("model_version"),
                         "cache_key": a.get("cache_key"),
+                        "inputs": a.get("inputs"),
                     }
                     for a in store.list("artifact")
                     if a["job"] == id

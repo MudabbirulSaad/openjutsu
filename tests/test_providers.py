@@ -84,3 +84,48 @@ def test_qualifications_distinguish_native_and_subject_profiles():
     assert preview != qualification_profile(
         "segmind", {**recipe, "subjects": [{"id": 1, "kind": "human"}]}
     )
+
+
+def test_finished_native_quotes_include_final_cost_and_exclude_noncontinuing_route(tmp_path):
+    from openjutsu.config import Secrets
+    from openjutsu.providers import account, make_quotes
+    from openjutsu.store import Store
+
+    store = Store(tmp_path)
+    secrets = Secrets(tmp_path)
+    clip = tmp_path / "conditioning.mp4"
+    clip.write_bytes(b"synthetic contract fixture")
+    store.put(
+        "artifact",
+        {
+            "id": "conditioning",
+            "path": str(clip),
+            "metadata": {"duration": 5, "width": 960, "height": 540},
+        },
+    )
+    recipe = {"mode": "advanced", "subjects": [{"id": 1, "kind": "fictional"}]}
+    job = {
+        "id": "job",
+        "revision": 1,
+        "recipe": recipe,
+        "artifacts": {"conditioning": "conditioning"},
+    }
+    secrets.update("storage", {"bucket": "synthetic"})
+    for name in ("argolink", "segmind", "byteplus"):
+        config = {"api_key": "test-only"}
+        secrets.update(name, config)
+        for native in (False, True):
+            store.put(
+                "qualification",
+                {
+                    "id": name + str(native),
+                    "provider": name,
+                    "account": account(config),
+                    "profile": qualification_profile(name, recipe, native),
+                },
+            )
+    quotes = make_quotes(store, secrets, job, finish="native")
+    eligible = [q for q in quotes if q["eligible"]]
+    assert eligible[0]["provider"] == "segmind"
+    assert all(q["finished_estimate"] > q["estimate"] for q in eligible)
+    assert not next(q for q in quotes if q["provider"] == "argolink")["eligible"]

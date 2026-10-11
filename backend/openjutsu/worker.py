@@ -85,7 +85,7 @@ def stage(task):
     if kind == "audio":
         path = output / "original.wav"
         if meta["has_audio"]:
-            audio(source, path)
+            audio(source, path, task.get("duration"), task.get("trim_start", 0))
             waveform(path, output / "waveform.json")
             return {"original_audio": str(path), "waveform": str(output / "waveform.json")}
         return {}

@@ -76,6 +76,29 @@ def local_readiness(model_dir):
             "license": spec["license"],
             "checkpoint_sha256": hashes.get(spec["file"]),
         }
+        if name == "describe":
+            from .store import fingerprint
+
+            ready[name]["checkpoint_sha256"] = (
+                fingerprint({k: v for k, v in hashes.items() if k.startswith("qwen3-vl/")})
+                if hashes
+                else None
+            )
+        repo = {
+            "depth": "video-depth-anything",
+            "sam2-large": "sam2",
+            "sam2-small": "sam2",
+            "seedvr2": "seedvr2",
+            "realesrgan": "realesrgan",
+        }.get(name)
+        if repo and (Path(model_dir) / repo / ".git").exists():
+            result = subprocess.run(
+                ["git", "-C", str(Path(model_dir) / repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            ready[name]["source_commit"] = result.stdout.strip() if result.returncode == 0 else None
         try:
             ready[name]["package_version"] = importlib.metadata.version(
                 {"whisper": "openai-whisper", "sam2": "sam-2"}.get(spec["package"], spec["package"])
@@ -94,6 +117,20 @@ def local_readiness(model_dir):
         }
     except ImportError:
         gpu = {"available": False, "name": None, "total_mb": 0}
+    if ready["sam3"]["ready"]:
+        validation_path = Path(model_dir) / "sam3-readiness.json"
+        validation = json.loads(validation_path.read_text()) if validation_path.is_file() else {}
+        checkpoint = Path(model_dir) / "sam3.pt"
+        ready["sam3"]["ready"] = bool(
+            validation.get("passed")
+            and validation.get("gpu") == gpu.get("name")
+            and validation.get("checkpoint_stamp")
+            == [checkpoint.stat().st_size, checkpoint.stat().st_mtime_ns]
+        )
+        if not ready["sam3"]["ready"]:
+            ready["sam3"]["reason"] = (
+                "Run an authorized local SAM 3 preparation smoke test on this GPU"
+            )
     return {"models": ready, "gpu": gpu}
 
 

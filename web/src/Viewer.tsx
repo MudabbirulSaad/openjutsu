@@ -90,7 +90,7 @@ export function Viewer({
       Math.abs(first.current.currentTime - frame / 24) > 0.005
     )
       first.current.currentTime = frame / 24;
-    if (second.current) second.current.currentTime = frame / 24;
+    if (second.current && !playing) second.current.currentTime = frame / 24;
   }, [frame, playing, compare]);
   useEffect(() => {
     let raf = 0;

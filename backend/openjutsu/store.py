@@ -221,9 +221,16 @@ class Store:
                 raise Conflict("Refresh the expired or stale quote")
             if not job["approval"] or job["approval"]["revision"] != revision:
                 raise Conflict("Approve this preparation first")
+            if quote.get("artifact") and quote["artifact"] != job["approval"]["artifact"]:
+                raise Conflict("Refresh the quote after preparation changes")
             if not quote["eligible"] or (not quote["qualified"] and not pilot):
                 raise Conflict(quote.get("reason") or "A qualification pilot is required")
-            if self._unknown(db, job_id) or job["status"] in {"generating", "exporting"}:
+            if self._unknown(db, job_id) or job["status"] in {
+                "queued",
+                "preparing",
+                "generating",
+                "exporting",
+            }:
                 raise Conflict("An existing generation must be reconciled first")
             if parent and job["preview_approval"] != parent:
                 raise Conflict("Approve the selected preview first")
@@ -248,6 +255,7 @@ class Store:
                 "parent": parent,
                 "pilot": pilot,
                 "recipe_snapshot": job["recipe"],
+                "conditioning": job["approval"]["artifact"],
                 "artifact": None,
                 "created": time.time(),
             }
@@ -278,6 +286,8 @@ class Store:
     def enqueue(self, job_id, kind, payload):
         with self.transaction() as db:
             job = self._get(db, "job", job_id)
+            if self._unknown(db, job_id):
+                raise Conflict("Reconcile the uncertain paid submission first")
             if job["status"] in {"queued", "preparing", "generating", "exporting"}:
                 raise Conflict("This job already has an active operation")
             id = identifier()
@@ -304,6 +314,15 @@ class Store:
         with self.transaction() as db:
             db.execute("UPDATE tasks SET state=? WHERE id=?", (state, id))
 
+    def local_active(self, job):
+        with self.transaction() as db:
+            return (
+                db.execute(
+                    "SELECT 1 FROM tasks WHERE job=? AND state IN ('queued','running')", (job,)
+                ).fetchone()
+                is not None
+            )
+
     def recover(self):
         with self.transaction() as db:
             db.execute("UPDATE tasks SET state='queued' WHERE state='running'")
@@ -312,6 +331,7 @@ class Store:
                 if a["status"] == "submitting":
                     a["status"] = "unknown_submission"
                     self._put(db, "attempt", a)
+                    self._event(db, a["job"], "submission_uncertain", attempt=a["id"])
 
     def events(self, after=0, job=None):
         with self.transaction() as db:

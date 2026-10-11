@@ -38,7 +38,11 @@ export function App() {
   const [connected, setConnected] = useState(true);
   useEffect(() => {
     const events = new EventSource("/api/events");
-    events.onopen = () => setConnected(true);
+    events.onopen = () => {
+      setConnected(true);
+      void client.invalidateQueries({ queryKey: ["job"] });
+      void client.invalidateQueries({ queryKey: ["jobs"] });
+    };
     events.onerror = () => setConnected(false);
     events.onmessage = () => {
       void client.invalidateQueries({ queryKey: ["jobs"] });

@@ -8,6 +8,9 @@ runtime="$HOME/.local/share/openjutsu"
 "$runtime/api-venv/bin/openjutsu" status JOB_ID
 # Explicit request JSON, e.g. {"revision": 1}:
 "$runtime/api-venv/bin/openjutsu" action JOB_ID prepare request.json
+"$runtime/api-venv/bin/openjutsu" edit JOB_ID recipe-request.json
+"$runtime/api-venv/bin/openjutsu" quotes JOB_ID --finish native
+"$runtime/api-venv/bin/openjutsu" accept JOB_ID ATTEMPT_ID REVISION
 ```
 
 | Operation | Endpoint |

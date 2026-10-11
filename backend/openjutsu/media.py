@@ -23,6 +23,28 @@ def probe(path):
     rate = (v or {}).get("avg_frame_rate", "0/1").split("/")
     fps = int(rate[0]) / int(rate[1]) if int(rate[1]) else 0
     duration = float(data.get("format", {}).get("duration", 0))
+    if not duration and a:
+        packets = json.loads(
+            run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_packets",
+                    "-show_entries",
+                    "packet=pts_time,duration_time",
+                    "-of",
+                    "json",
+                    str(path),
+                ]
+            )
+        )["packets"]
+        duration = max(
+            (float(p.get("pts_time", 0)) + float(p.get("duration_time", 0)) for p in packets),
+            default=0,
+        ) - float(data.get("format", {}).get("start_time", 0))
     rotation = next(
         (s.get("rotation", 0) for s in (v or {}).get("side_data_list", []) if "rotation" in s), 0
     )
@@ -138,13 +160,22 @@ class Media:
             "producer": producer,
             "cache_key": cache_key,
         }
-        manifest = path.parent / "manifest.json"
+        manifest = next(
+            (
+                folder / "manifest.json"
+                for folder in path.parents
+                if folder.is_relative_to(self.config.root / "cache")
+                and (folder / "manifest.json").is_file()
+            ),
+            path.parent / "manifest.json",
+        )
         if manifest.is_file():
             provenance = json.loads(manifest.read_text())
-            item["cache_key"] = path.parent.name
+            item["cache_key"] = manifest.parent.name
             item["stage"] = provenance.get("stage")
             item["model"] = provenance.get("model")
             item["model_version"] = provenance.get("model_version")
+            item["inputs"] = provenance.get("inputs")
         return self.store.put("artifact", item)
 
     def frame(self, artifact, index):
@@ -212,8 +243,10 @@ def normalize(source, output, start, end):
     return probe(output)
 
 
-def audio(source, output, duration=None):
+def audio(source, output, duration=None, start=0):
     args = ["ffmpeg", "-v", "error", "-i", str(source), "-vn", "-ar", "44100", "-ac", "2"]
+    if start:
+        args.extend(["-ss", str(start)])
     if duration:
         args.extend(["-af", "apad", "-t", str(duration)])
     run([*args, "-c:a", "pcm_f32le", "-y", str(output)])

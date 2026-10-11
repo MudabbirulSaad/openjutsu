@@ -68,3 +68,32 @@ def doctor():
     typer.echo(
         "FFmpeg: " + (os.getenv("PATH", "") and __import__("shutil").which("ffmpeg") or "missing")
     )
+
+
+@app.command()
+def accept(job: str, attempt: str, revision: int, url: str = "http://127.0.0.1:9780"):
+    """Accept an inspected preview from an exact recipe revision."""
+    response = httpx.post(
+        f"{url}/api/jobs/{job}/approve-preview/{attempt}", json={"revision": revision}
+    )
+    response.raise_for_status()
+    typer.echo(json.dumps(response.json(), indent=2))
+
+
+@app.command()
+def edit(job: str, body: Path, url: str = "http://127.0.0.1:9780"):
+    """Save a recipe JSON containing revision and recipe; approval is invalidated."""
+    response = httpx.put(f"{url}/api/jobs/{job}/recipe", json=json.loads(body.read_text()))
+    response.raise_for_status()
+    typer.echo(json.dumps(response.json(), indent=2))
+
+
+@app.command()
+def quotes(job: str, finish: str = "upscale", parent: str = "", url: str = "http://127.0.0.1:9780"):
+    """Read finished-output quotes without submitting a paid request."""
+    params = {"finish": finish}
+    if parent:
+        params["parent"] = parent
+    response = httpx.get(f"{url}/api/jobs/{job}/quotes", params=params)
+    response.raise_for_status()
+    typer.echo(json.dumps(response.json(), indent=2))

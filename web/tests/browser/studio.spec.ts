@@ -31,11 +31,15 @@ test("four stages, real approvals, duplicate-click prevention, export and themes
     page.getByRole("heading", { name: "Generation route" }),
   ).toBeVisible();
   let posts = 0;
+  await page
+    .getByRole("combobox", { name: "Finished output plan" })
+    .selectOption("original");
   page.on("request", (r) => {
     if (r.method() === "POST" && r.url().endsWith("/previews")) posts++;
   });
   const submit = page.getByRole("button", { name: "Submit 480p preview" });
   await expect(submit).toBeEnabled();
+  await expect(page.getByText(/\$NaN/)).toHaveCount(0);
   await submit.dblclick({ force: true });
   await expect(
     page.getByRole("button", { name: "Accept this preview" }),
@@ -51,8 +55,15 @@ test("four stages, real approvals, duplicate-click prevention, export and themes
   await expect(page.locator(".attempt")).toHaveCount(2);
   await expect(
     page.getByRole("button", { name: "Accept this preview" }),
-  ).toBeEnabled();
-  await page.getByRole("button", { name: "Accept this preview" }).click();
+  ).toBeEnabled({ timeout: 15000 });
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/approve-preview/") &&
+        r.request().method() === "POST",
+    ),
+    page.getByRole("button", { name: "Accept this preview" }).click(),
+  ]);
   const accepted = await request
     .get(`/api/jobs/${fixture.job}`)
     .then((r) => r.json());
@@ -60,6 +71,9 @@ test("four stages, real approvals, duplicate-click prevention, export and themes
   await expect(
     page.getByRole("heading", { name: "Finalization", exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole("radio", { name: /Original preview resolution/ })
+    .check();
   await page.getByRole("button", { name: "Finalize selected output" }).click();
   await expect(page.getByRole("link", { name: /Native master/ })).toBeVisible({
     timeout: 20000,

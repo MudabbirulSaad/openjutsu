@@ -146,7 +146,10 @@ export function SpeechRecorder({
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
-      recorder.current?.stop();
+      if (recorder.current?.state === "recording") {
+        recorder.current.onstop = null;
+        recorder.current.stop();
+      }
       recorder.current?.stream.getTracks().forEach((t) => t.stop());
     },
     [],
