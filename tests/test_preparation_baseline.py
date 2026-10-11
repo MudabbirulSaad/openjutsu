@@ -234,9 +234,6 @@ def test_quality_worker_refuses_or_completes_clothing_mask(tmp_path, monkeypatch
     )
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="Global allow_empty_frames hides gaps"
-)
 def test_quality_worker_refuses_visible_subject_gap(tmp_path, monkeypatch, worker_io):
     try:
         result = run_mask(tmp_path, monkeypatch, predicted_masks(gap=True))

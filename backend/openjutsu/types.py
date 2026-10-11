@@ -38,6 +38,17 @@ class FrameInterval(Strict):
         return self
 
 
+class VisibilityInterval(FrameInterval):
+    state: Literal["absent", "fully_occluded", "partially_occluded"]
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def explained(self):
+        if not self.reason.strip():
+            raise ValueError("Visibility changes require an evidence-based reason")
+        return self
+
+
 class Subject(Strict):
     id: int = Field(ge=1, le=3)
     name: str = Field(default="Subject", max_length=100)
@@ -46,6 +57,8 @@ class Subject(Strict):
     portrait_asset: str | None = None
     consent_confirmed: bool = False
     intervals: list[FrameInterval] = Field(default_factory=list, max_length=30)
+    visibility: list[VisibilityInterval] = Field(default_factory=list, max_length=100)
+    seed_frame: int | None = Field(default=None, ge=0)
     annotations: list[Annotation] = Field(default_factory=list, max_length=100)
 
 
@@ -84,6 +97,16 @@ class Recipe(Strict):
                         "Intervals must be ordered, non-overlapping, and inside the clip"
                     )
                 previous = interval.end
+            previous = 0
+            spans = subject.intervals or [FrameInterval(start=0, end=count)]
+            for note in subject.visibility:
+                if note.start < previous or not any(
+                    span.start <= note.start < note.end <= span.end for span in spans
+                ):
+                    raise ValueError(
+                        "Visibility must be ordered and contained in tracking intervals"
+                    )
+                previous = note.end
         if self.mode in {"fast", "combined"} and len(self.subjects) > 1:
             raise ValueError("Mesh modes initially support one subject")
         if self.audio == "custom" and not self.custom_audio:

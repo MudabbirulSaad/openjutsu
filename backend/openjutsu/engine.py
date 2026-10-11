@@ -77,7 +77,10 @@ class Engine:
                 raise Conflict("A correction frame is beyond the selected clip")
         if r["mode"] != "fast":
             validate_bindings(r)
-        if r["segmentation"] == "sam3" and any(s.get("intervals") for s in r["subjects"]):
+        if r["segmentation"] == "sam3" and any(
+            s.get("intervals") or s.get("visibility") or s.get("seed_frame") is not None
+            for s in r["subjects"]
+        ):
             raise Conflict("Shot intervals currently require SAM 2.1")
         missing = [
             m
@@ -134,7 +137,7 @@ class Engine:
         }
         key = fingerprint(
             {
-                "version": 4 if name == "mask" else 2 if name == "depth" else 1,
+                "version": 5 if name == "mask" else 2 if name == "depth" else 1,
                 "stage": name,
                 "inputs": dependencies,
                 "parameters": parameters,
@@ -317,6 +320,8 @@ class Engine:
                                 "id": s["id"],
                                 "annotations": s["annotations"],
                                 "intervals": s.get("intervals", []),
+                                "visibility": s.get("visibility", []),
+                                "seed_frame": s.get("seed_frame"),
                             }
                             for s in r["subjects"]
                         ],

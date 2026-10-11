@@ -3,13 +3,22 @@
 import argparse
 import copy
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 from openjutsu import worker
-from openjutsu.tracking import load_masks, sam2_track_interval, save_masks, validate_bindings
+from openjutsu.tracking import (
+    load_masks,
+    merge_subject_mask,
+    sam2_track_interval,
+    save_masks,
+    tracking_report,
+    validate_bindings,
+    visible_spans,
+)
 from openjutsu.types import Recipe
 from PIL import Image, ImageDraw
 from preserve_pilot import private_destination, sha256
@@ -30,7 +39,17 @@ def overlay(bgr, selected):
     return Image.fromarray(rgb)
 
 
-def face_audit(source_frames, candidate, begin, model_path, subject_id):
+def verify_fixture_readback(path, arrays):
+    """Do not label a candidate fixture complete until every saved member is readable/exact."""
+    with np.load(path, allow_pickle=False) as archive:
+        if set(archive.files) != set(arrays):
+            raise ValueError("Candidate fixture members differ on readback")
+        for name, expected in arrays.items():
+            if not np.array_equal(archive[name], expected):
+                raise ValueError(f"Candidate fixture {name} differs on readback")
+
+
+def face_audit(source_frames, candidate, begin, model_path, subject_id, crop=None):
     """Measure face hulls only; detector misses still require silhouette review."""
     import cv2
     import mediapipe as mp
@@ -39,7 +58,9 @@ def face_audit(source_frames, candidate, begin, model_path, subject_id):
         base_options=mp.tasks.BaseOptions(
             model_asset_path=str(model_path), delegate=mp.tasks.BaseOptions.Delegate.CPU
         ),
-        running_mode=mp.tasks.vision.RunningMode.VIDEO,
+        running_mode=mp.tasks.vision.RunningMode.IMAGE
+        if crop
+        else mp.tasks.vision.RunningMode.VIDEO,
         num_faces=3,
         min_face_detection_confidence=0.5,
         min_face_presence_confidence=0.5,
@@ -49,14 +70,20 @@ def face_audit(source_frames, candidate, begin, model_path, subject_id):
     with mp.tasks.vision.FaceLandmarker.create_from_options(options) as model:
         for index, bgr in enumerate(source_frames):
             frame = begin + index
-            result = model.detect_for_video(
-                mp.Image(image_format=mp.ImageFormat.SRGB, data=bgr[..., ::-1].copy()),
-                round(frame * 1000 / 24),
+            x0, y0, x1, y1 = crop or (0, 0, candidate.shape[2], candidate.shape[1])
+            rgb = bgr[y0:y1, x0:x1, ::-1].copy()
+            if crop:
+                rgb = cv2.resize(rgb, ((x1 - x0) * 4, (y1 - y0) * 4))
+            input_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = (
+                model.detect(input_image)
+                if crop
+                else model.detect_for_video(input_image, round(frame * 1000 / 24))
             )
             faces = []
             for points in result.face_landmarks:
                 xy = np.array(
-                    [[p.x * candidate.shape[2], p.y * candidate.shape[1]] for p in points],
+                    [[x0 + p.x * (x1 - x0), y0 + p.y * (y1 - y0)] for p in points],
                     np.float32,
                 )
                 hull = np.zeros(candidate.shape[1:], np.uint8)
@@ -81,11 +108,21 @@ def main():
     parser.add_argument("--subject", type=int, required=True)
     parser.add_argument("--interval", type=int, required=True)
     parser.add_argument("--audit-faces", action="store_true")
+    parser.add_argument("--face-audit-crop", type=int, nargs=4)
+    parser.add_argument("--base-candidate", type=Path)
+    parser.add_argument("--review-frames", type=int, nargs="+")
     args = parser.parse_args()
     saved = json.loads(args.manifest.read_text())
     root = Path(saved["runtime"])
     out = private_destination(
-        args.out, [root, Path(saved["evidence"]), Path(saved["exports"]), args.manifest.parent]
+        args.out,
+        [
+            root,
+            Path(saved["evidence"]),
+            Path(saved["exports"]),
+            args.manifest.parent,
+            *([args.base_candidate] if args.base_candidate else []),
+        ],
     )
     out.mkdir(parents=True, exist_ok=False)
     records = saved["ledger"]["records"]
@@ -94,19 +131,36 @@ def main():
     artifacts = {k: records[f"artifact:{id}"] for k, id in job["artifacts"].items()}
     recipe = Recipe.model_validate_json(args.recipe.read_text()).model_dump(mode="json")
     validate_bindings(recipe)
-    original_recipe = attempt["recipe_snapshot"]
+    original_recipe = Recipe.model_validate(attempt["recipe_snapshot"]).model_dump(mode="json")
+    base_mask_path = artifacts["mask_data"]["path"]
+    if args.base_candidate:
+        original_recipe = Recipe.model_validate_json(
+            (args.base_candidate / "recipe.json").read_text()
+        ).model_dump(mode="json")
+        base_mask_path = args.base_candidate / "masks.npy"
+        base_fixture = json.loads((args.base_candidate / "fixture/fixture.json").read_text())
+        assert sha256(base_mask_path) == base_fixture["candidate_hashes"]["mask_data"]
     unchanged = copy.deepcopy(recipe)
     for s, original in zip(unchanged["subjects"], original_recipe["subjects"]):
         if s["id"] == args.subject:
             s["annotations"] = original["annotations"]
-    assert unchanged == original_recipe, "Only the selected subject's annotations may change"
+            s["visibility"] = original["visibility"]
+            s["seed_frame"] = original["seed_frame"]
+    assert unchanged == original_recipe, "Only the selected subject's prompts/visibility may change"
     subject = next(s for s in recipe["subjects"] if s["id"] == args.subject)
     span = subject["intervals"][args.interval]
     begin, end = span["start"], span["end"]
     original_subject = next(s for s in original_recipe["subjects"] if s["id"] == args.subject)
+    if subject["seed_frame"] != original_subject["seed_frame"]:
+        assert subject["seed_frame"] is None or begin <= subject["seed_frame"] < end, (
+            "New seed must belong to the selected interval"
+        )
     assert [a for a in subject["annotations"] if not begin <= a["frame"] < end] == [
         a for a in original_subject["annotations"] if not begin <= a["frame"] < end
     ], "Annotations outside the selected interval changed"
+    assert [n for n in subject["visibility"] if not begin <= n["start"] < n["end"] <= end] == [
+        n for n in original_subject["visibility"] if not begin <= n["start"] < n["end"] <= end
+    ], "Visibility outside the selected interval changed"
     for name in ("mask_data", "normalized", "depth", "conditioning"):
         assert sha256(artifacts[name]["path"]) == artifacts[name]["hash"], (
             f"Changed original {name}"
@@ -123,7 +177,7 @@ def main():
     import torch
     from sam2.build_sam import build_sam2_video_predictor
 
-    original = load_masks(artifacts["mask_data"]["path"])
+    original = load_masks(base_mask_path)
     candidate = np.array(original)
     assert not ((candidate[begin:end] != 0) & (candidate[begin:end] != args.subject)).any(), (
         "Overlapping subjects require separate review"
@@ -135,22 +189,28 @@ def main():
         device="cuda",
         hydra_overrides_extra=["++model.add_all_frames_to_correct_as_cond=true"],
     )
-    shot = (
-        Path(artifacts["mask_data"]["path"]).parent
-        / f"subject-{args.subject}-interval-{args.interval}"
-    )
+    inputs = Path(artifacts["mask_data"]["path"]).parent / "frames"
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-        for index, ids, logits in sam2_track_interval(
-            predictor, shot, subject, span, original.shape[2], original.shape[1]
-        ):
-            assert list(ids) == [args.subject], "Unexpected SAM subject ID"
-            candidate[begin + index] = (logits[0, 0] > 0).cpu().numpy().astype(
-                np.uint8
-            ) * args.subject
+        for visible in visible_spans(subject, len(original)):
+            if not begin <= visible["start"] < visible["end"] <= end:
+                continue
+            shot = out / f"inputs-{visible['start']}-{visible['end']}"
+            shot.mkdir()
+            for frame in range(visible["start"], visible["end"]):
+                shutil.copyfile(
+                    inputs / f"{frame:06}.jpg", shot / f"{frame - visible['start']:06}.jpg"
+                )
+            for index, ids, logits in sam2_track_interval(
+                predictor, shot, subject, visible, original.shape[2], original.shape[1]
+            ):
+                frame = visible["start"] + index
+                merge_subject_mask(
+                    candidate[frame], (logits[0, 0] > 0).cpu().numpy(), args.subject, frame
+                )
     assert np.array_equal(candidate[:begin], original[:begin])
     assert np.array_equal(candidate[end:], original[end:])
-    assert (candidate[begin:end].reshape(end - begin, -1).max(axis=1) == args.subject).all(), (
-        "New interval gap"
+    (out / "tracking.json").write_text(
+        json.dumps(tracking_report(candidate, recipe["subjects"]), indent=2)
     )
     mask_path = save_masks(out, candidate)
     (out / "recipe.json").write_text(json.dumps(recipe, indent=2))
@@ -201,6 +261,7 @@ def main():
                 294,
                 295,
                 *(int(f) for f in probes),
+                *(args.review_frames or []),
             ]
         )
     )
@@ -211,9 +272,16 @@ def main():
         ("normalized", artifacts["normalized"]["path"]),
         ("depth", artifacts["depth"]["path"]),
         ("conditioning", conditioning["conditioning"]),
+        (
+            "previous_conditioning",
+            args.base_candidate / "conditioning/conditioning.mp4"
+            if args.base_candidate
+            else artifacts["conditioning"]["path"],
+        ),
     ]:
         arrays[key] = decode_frames(path, indices, original.shape[2], original.shape[1])
-    np.savez(fixture_dir / "frames.npz", **arrays)
+    np.savez_compressed(fixture_dir / "frames.npz", **arrays)
+    verify_fixture_readback(fixture_dir / "frames.npz", arrays)
     baseline = json.loads((args.manifest.parent / "fixture-verified" / "fixture.json").read_text())
     fixture = {
         **baseline,
@@ -225,7 +293,8 @@ def main():
         "model_version": version,
         "unchanged_outside_interval": True,
         "candidate_mask_path": str(mask_path.resolve()),
-        "original_mask_path": artifacts["mask_data"]["path"],
+        "original_mask_path": str(Path(base_mask_path).resolve()),
+        "recipe": recipe,
         "candidate_hashes": {
             "mask_data": sha256(mask_path),
             "conditioning": sha256(conditioning["conditioning"]),
@@ -242,13 +311,16 @@ def main():
             "regions": {},
             "previous_iou": float(
                 ((original[frame] == args.subject) & mask).sum()
-                / ((original[frame] == args.subject) | mask).sum()
+                / max(1, ((original[frame] == args.subject) | mask).sum())
             ),
         }
         for name, box in regions.items():
             roi = rectangle(mask.shape, box)
             item["regions"][name] = float(mask[roi].mean())
-        face = rectangle(mask.shape, regions["face"])
+        face = rectangle(mask.shape, regions["face"]) if "face" in regions else mask
+        if not face.any():
+            measured.append(item)
+            continue
         item["face_depth_mae"] = float(
             np.abs(
                 arrays["conditioning"][index][face].astype(float) - arrays["depth"][index][face]
@@ -264,18 +336,28 @@ def main():
     (out / "measurements.json").write_text(json.dumps(measured, indent=2))
     sheets = out / "sheets"
     sheets.mkdir()
-    for frame in [229, 230, 231, 242, 259, 260, 261, 280]:
+    for frame in args.review_frames or [229, 230, 231, 242, 259, 260, 261, 280]:
         index = indices.index(frame)
         images = [
             Image.fromarray(arrays["normalized"][index][..., ::-1]),
             overlay(arrays["normalized"][index], original[frame] == args.subject),
             overlay(arrays["normalized"][index], candidate[frame] == args.subject),
+            Image.fromarray(arrays["previous_conditioning"][index][..., ::-1]),
             Image.fromarray(arrays["conditioning"][index][..., ::-1]),
         ]
-        sheet = Image.new("RGB", (2160, 990), (22, 22, 22))
+        sheet = Image.new("RGB", (2700, 990), (22, 22, 22))
         draw = ImageDraw.Draw(sheet)
         for col, (label, image) in enumerate(
-            zip(("Original", "Previous mask", "Corrected mask", "Candidate conditioning"), images)
+            zip(
+                (
+                    "Original",
+                    "Previous mask",
+                    "Corrected mask",
+                    "Previous conditioning",
+                    "Candidate conditioning",
+                ),
+                images,
+            )
         ):
             sheet.paste(image, (col * 540, 0))
             draw.text((col * 540 + 8, 968), f"{label} / frame {frame}", fill="white")
@@ -286,10 +368,16 @@ def main():
     )
     if args.audit_faces:
         records = face_audit(
-            source_frames, candidate, begin, root / "models" / "face_landmarker.task", args.subject
+            source_frames,
+            candidate,
+            begin,
+            root / "models" / "face_landmarker.task",
+            args.subject,
+            args.face_audit_crop,
         )
         (out / "face-hull-audit.json").write_text(json.dumps(records, indent=2))
         fixture["face_hull_audit"] = records
+        fixture["face_audit_crop"] = args.face_audit_crop
         (fixture_dir / "fixture.json").write_text(json.dumps(fixture, indent=2))
     for first in range(begin, end, 24):
         frames = list(range(first, min(first + 24, end)))

@@ -7,7 +7,15 @@ import time
 from pathlib import Path
 
 from .media import audio, mux, normalize, probe, run, timeline, waveform
-from .tracking import MASK_COLORS, intervals, load_masks, sam2_track_interval, save_masks
+from .tracking import (
+    MASK_COLORS,
+    load_masks,
+    merge_subject_mask,
+    sam2_track_interval,
+    save_masks,
+    tracking_report,
+    visible_spans,
+)
 
 
 def emit(**event):
@@ -214,6 +222,11 @@ def stage(task):
         count = meta["frames"]
         masks = np.zeros((count, meta["height"], meta["width"]), dtype=np.uint8)
         if r["segmentation"] == "sam3":
+            if any(
+                s.get("intervals") or s.get("visibility") or s.get("seed_frame") is not None
+                for s in r["subjects"]
+            ):
+                raise ValueError("Shot intervals and visibility currently require SAM 2.1")
             from sam3.model_builder import build_sam3_video_predictor
 
             predictor = build_sam3_video_predictor(
@@ -242,7 +255,12 @@ def stage(task):
                 ):
                     data = result["outputs"]
                     for id, mask in zip(data["out_obj_ids"], data["out_binary_masks"]):
-                        masks[result["frame_index"]][mask.astype(bool)] = int(id)
+                        index = result["frame_index"]
+                        if not 0 <= index < count or int(id) not in [
+                            s["id"] for s in r["subjects"]
+                        ]:
+                            raise ValueError("SAM returned an unexpected frame or subject identity")
+                        merge_subject_mask(masks[index], mask, int(id), index)
             finally:
                 predictor.handle_request({"type": "close_session", "session_id": session})
         else:
@@ -259,9 +277,9 @@ def stage(task):
             )
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
                 for subject in r["subjects"]:
-                    for number, span in enumerate(intervals(subject, count)):
+                    for number, span in enumerate(visible_spans(subject, count)):
                         begin, end = span["start"], span["end"]
-                        shot = output / f"subject-{subject['id']}-interval-{number}"
+                        shot = output / f"subject-{subject['id']}-interval-{number}-{begin}-{end}"
                         shot.mkdir(exist_ok=True)
                         for frame in range(begin, end):
                             target = shot / f"{frame - begin:06}.jpg"
@@ -271,24 +289,20 @@ def stage(task):
                             predictor, shot, subject, span, meta["width"], meta["height"]
                         ):
                             for id, logit in zip(ids, logits):
-                                frame_mask = masks[begin + index]
-                                frame_mask[frame_mask == int(id)] = 0
-                                frame_mask[(logit[0] > 0).cpu().numpy()] = int(id)
+                                if not 0 <= index < end - begin or int(id) != subject["id"]:
+                                    raise ValueError(
+                                        "SAM returned an unexpected frame or subject identity"
+                                    )
+                                merge_subject_mask(
+                                    masks[begin + index],
+                                    (logit[0] > 0).cpu().numpy(),
+                                    int(id),
+                                    begin + index,
+                                )
                             emit(completed=begin + index + 1, total=count)
                         torch.cuda.empty_cache()
-        missing = [int(i) for i in np.where(masks.reshape(count, -1).max(axis=1) == 0)[0]]
-        if missing and not r.get("allow_empty_frames", False):
-            raise ValueError(f"No subject mask on frames {missing[:20]}; add correction anchors")
         report = output / "tracking.json"
-        report.write_text(
-            json.dumps(
-                {
-                    "empty_frames": missing,
-                    "frames": count,
-                    "intervals": {str(s["id"]): intervals(s, count) for s in r["subjects"]},
-                }
-            )
-        )
+        report.write_text(json.dumps(tracking_report(masks, r["subjects"])))
         mask_data = save_masks(output, masks)
         colors = np.array(MASK_COLORS, dtype=np.uint8)
         encode_frames(

@@ -48,6 +48,50 @@ def test_stage_cache_survives_new_engine_and_changes_invalidate(local):
     assert probe(new["normalized"])["frames"] == 96
 
 
+def test_preparation_includes_visibility_and_seed_in_mask_cache_inputs(local, monkeypatch):
+    import copy
+
+    config, store, job, source = local
+    engine = Engine(config, store)
+    job["recipe"]["subjects"] = [
+        {
+            "id": 1,
+            "annotations": [{"frame": 30, "points": [{"x": 0.5, "y": 0.5}]}],
+            "intervals": [{"start": 0, "end": 120}],
+            "seed_frame": 30,
+            "visibility": [
+                {
+                    "start": 0,
+                    "end": 20,
+                    "state": "fully_occluded",
+                    "reason": "Synthetic foreground object",
+                }
+            ],
+        }
+    ]
+    captured = []
+
+    def stage(job, name, source_path, parameters, **kwargs):
+        if name == "mask":
+            captured.append(copy.deepcopy(parameters))
+            return {"mask_data": str(source)}
+        return (
+            {name if name != "normalize" else "normalized": str(source)} if name != "audio" else {}
+        )
+
+    monkeypatch.setattr(engine, "run_stage", stage)
+    monkeypatch.setattr(engine.media, "artifact", lambda *args: {"id": "synthetic"})
+    engine.preparation(job)
+    subject = job["recipe"]["subjects"][0]
+    assert captured[0]["subjects"][0]["visibility"] == subject["visibility"]
+    assert captured[0]["subjects"][0]["seed_frame"] == 30
+    subject["visibility"][0]["end"] = 21
+    engine.preparation(job)
+    subject["seed_frame"] = 31
+    engine.preparation(job)
+    assert captured[0] != captured[1] != captured[2]
+
+
 def test_claimed_task_is_requeued_on_restart(local):
     config, store, job, _ = local
     task = store.enqueue(job["id"], "prepare", {"revision": 1})

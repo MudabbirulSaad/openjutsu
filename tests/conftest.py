@@ -8,6 +8,9 @@ import pytest
 def pytest_addoption(parser):
     parser.addoption("--pilot-fixture", help="Private fixture directory from reproduce_pilot.py")
     parser.addoption("--candidate-fixture", help="Private Step 2 candidate fixture directory")
+    parser.addoption(
+        "--tracking-fixture", help="Private Step 3 tracking candidate fixture directory"
+    )
 
 
 @pytest.fixture(scope="session")
@@ -36,3 +39,11 @@ def load_private_fixture(folder):
     with np.load(folder / "frames.npz", allow_pickle=False) as archive:
         arrays = {k: archive[k] for k in archive.files}
     return metadata, arrays
+
+
+@pytest.fixture(scope="session")
+def tracking_fixture(request):
+    folder = request.config.getoption("--tracking-fixture")
+    if not folder:
+        pytest.skip("Private Step 3 candidate is opt-in; never included in Git/CI")
+    return load_private_fixture(folder)

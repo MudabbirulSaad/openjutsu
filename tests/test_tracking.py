@@ -76,7 +76,7 @@ def test_sam_prompts_merge_same_frame_points_and_box_with_correct_scale():
             order = range(start_frame_idx, -1, -1) if reverse else range(start_frame_idx, 10)
             for index in order:
                 state["tracked"].add(index)
-                yield index, [2], None
+                yield index, [2], [None]
 
     cast = {
         "id": 2,

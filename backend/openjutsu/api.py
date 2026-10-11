@@ -443,6 +443,8 @@ def create_app(config=None, start_workers=True):
                     "annotations": [],
                     "references": [],
                     "intervals": [],
+                    "visibility": [],
+                    "seed_frame": None,
                     "consent_confirmed": False,
                 }
                 for s in j["recipe"]["subjects"]
