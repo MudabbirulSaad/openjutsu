@@ -87,7 +87,7 @@ def worker_io(monkeypatch):
     return encoded
 
 
-def run_mask(tmp_path, monkeypatch, masks, allow_empty=True):
+def run_mask(tmp_path, monkeypatch, masks, allow_empty=True, context_aware=False, event_log=None):
     spans = [{"start": 160, "end": 192}, {"start": 192, "end": COUNT}]
 
     class Predictor:
@@ -95,10 +95,18 @@ def run_mask(tmp_path, monkeypatch, masks, allow_empty=True):
             self.spans = iter(spans)
 
         def init_state(self, path, **kwargs):
-            return next(self.spans)
+            return {**next(self.spans), "tracked": set(), "anchors": {}}
 
         def add_new_points_or_box(self, state, index, id, **kwargs):
             assert id == 3 and 0 <= index < state["end"] - state["start"]
+            if event_log is not None:
+                event_log.append((state["start"] + index, index in state["tracked"], kwargs))
+            if context_aware:
+                state["anchors"][index] = (
+                    predicted_masks()[state["start"] + index]
+                    if index in state["tracked"]
+                    else masks[state["start"] + index]
+                )
 
         def propagate_in_video(self, state, start_frame_idx, reverse):
             begin, end = state["start"], state["end"]
@@ -106,7 +114,9 @@ def run_mask(tmp_path, monkeypatch, masks, allow_empty=True):
                 range(start_frame_idx, -1, -1) if reverse else range(start_frame_idx, end - begin)
             )
             for index in indices:
-                logits = np.where(masks[begin + index] == 3, 1.0, -1.0)
+                state["tracked"].add(index)
+                selected = state["anchors"].get(index, masks[begin + index])
+                logits = np.where(selected == 3, 1.0, -1.0)
                 yield index, [3], [[Tensor(logits)]]
 
     torch = ModuleType("torch")
@@ -176,6 +186,27 @@ def test_worker_preserves_complete_subject_predictions(tmp_path, monkeypatch, wo
 def test_worker_rejects_tracking_gap_without_global_allowance(tmp_path, monkeypatch, worker_io):
     with pytest.raises(ValueError, match="No subject mask on frames"):
         run_mask(tmp_path, monkeypatch, predicted_masks(gap=True), allow_empty=False)
+
+
+@pytest.mark.parametrize("frame", [230, 260])
+def test_correction_uses_tracked_person_context(tmp_path, monkeypatch, worker_io, frame):
+    events = []
+    result = run_mask(
+        tmp_path, monkeypatch, predicted_masks(clothing=True), context_aware=True, event_log=events
+    )
+    assert next(tracked for f, tracked, _ in events if f == frame), (
+        "Correction added before tracking"
+    )
+    assert (load_masks(result["mask_data"])[frame][FACE] == 3).all()
+
+
+def test_correction_replaces_stale_background_pixels(tmp_path, monkeypatch, worker_io):
+    masks = predicted_masks(clothing=True)
+    masks[230, :8, :8] = 3
+    result = run_mask(tmp_path, monkeypatch, masks, context_aware=True)
+    assert not load_masks(result["mask_data"])[230, :8, :8].any(), (
+        "Old positive pixels survived correction"
+    )
 
 
 def test_complete_mask_removes_source_face_and_preserves_background(
