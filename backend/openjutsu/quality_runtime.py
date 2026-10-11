@@ -1,12 +1,14 @@
 """Local source detectors and exact artifact decoding. Never alters source or masks."""
 
 import json
+import zlib
 from contextlib import ExitStack
 from pathlib import Path
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile
 
 import numpy as np
 
+from .artifacts import verify_depth
 from .media import digest, probe
 from .quality import PreparationAudit
 
@@ -103,18 +105,9 @@ def check_required_files(recipe, binding, paths, count):
     timing = json.loads(Path(paths["timeline"]).read_text())
     if timing.get("fps") != 24 or [f["frame"] for f in timing["frames"]] != list(range(count)):
         raise ValueError("Unreadable or misaligned frame timeline")
-    # Readability is a gate; repairing the storage mechanism is a later stage.
+    # Recheck the numerical artifact independently of any cache receipt.
     if "depth_data" in required:
-        with ZipFile(paths["depth_data"]) as archive:
-            if archive.testzip() is not None:
-                raise ValueError("Depth archive CRC validation failed")
-        with np.load(paths["depth_data"], allow_pickle=False) as archive:
-            for name in archive.files:
-                values = archive[name]
-                if not np.isfinite(values).all():
-                    raise ValueError("Depth archive contains non-finite values")
-            if "depths" not in archive.files or len(archive["depths"]) != count:
-                raise ValueError("Depth archive frame count differs from normalized source")
+        verify_depth(paths["depth_data"], count)
     return required
 
 
@@ -217,7 +210,7 @@ def audit_artifacts(recipe, binding, paths, models, progress=lambda **_: None, d
             "All required artifact hashes, depth members and exact video frames were read successfully.",
             measurements={"decoded_frames": count, "dimensions": list(shape)},
         )
-    except (OSError, ValueError, KeyError, RuntimeError, BadZipFile) as exc:
+    except (OSError, ValueError, KeyError, RuntimeError, EOFError, BadZipFile, zlib.error) as exc:
         audit.add(
             "artifact_validation_failed",
             "BLOCKED",

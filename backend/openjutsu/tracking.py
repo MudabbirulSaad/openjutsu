@@ -184,18 +184,9 @@ def tracking_report(masks, subjects):
 
 
 def save_masks(folder, masks):
-    import os
+    from .artifacts import write_npy
 
-    import numpy as np
-
-    path = folder / "masks.npy"
-    temporary = folder / ".masks.tmp"
-    with temporary.open("wb") as stream:
-        np.save(stream, masks, allow_pickle=False)
-        stream.flush()
-        os.fsync(stream.fileno())
-    temporary.replace(path)
-    return path
+    return write_npy(folder / "masks.npy", masks)
 
 
 def load_masks(path):

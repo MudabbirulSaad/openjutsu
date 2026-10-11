@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 from openjutsu import worker
+from openjutsu.artifacts import verify_npz, write_json, write_npz
 from openjutsu.tracking import (
     load_masks,
     merge_subject_mask,
@@ -41,12 +42,7 @@ def overlay(bgr, selected):
 
 def verify_fixture_readback(path, arrays):
     """Do not label a candidate fixture complete until every saved member is readable/exact."""
-    with np.load(path, allow_pickle=False) as archive:
-        if set(archive.files) != set(arrays):
-            raise ValueError("Candidate fixture members differ on readback")
-        for name, expected in arrays.items():
-            if not np.array_equal(archive[name], expected):
-                raise ValueError(f"Candidate fixture {name} differs on readback")
+    verify_npz(path, arrays)
 
 
 def face_audit(source_frames, candidate, begin, model_path, subject_id, crop=None):
@@ -280,8 +276,7 @@ def main():
         ),
     ]:
         arrays[key] = decode_frames(path, indices, original.shape[2], original.shape[1])
-    np.savez_compressed(fixture_dir / "frames.npz", **arrays)
-    verify_fixture_readback(fixture_dir / "frames.npz", arrays)
+    write_npz(fixture_dir / "frames.npz", arrays)
     baseline = json.loads((args.manifest.parent / "fixture-verified" / "fixture.json").read_text())
     fixture = {
         **baseline,
@@ -300,7 +295,7 @@ def main():
             "conditioning": sha256(conditioning["conditioning"]),
         },
     }
-    (fixture_dir / "fixture.json").write_text(json.dumps(fixture, indent=2))
+    write_json(fixture_dir / "fixture.json", fixture)
     measured = []
     for frame, regions in probes.items():
         frame = int(frame)
@@ -378,7 +373,7 @@ def main():
         (out / "face-hull-audit.json").write_text(json.dumps(records, indent=2))
         fixture["face_hull_audit"] = records
         fixture["face_audit_crop"] = args.face_audit_crop
-        (fixture_dir / "fixture.json").write_text(json.dumps(fixture, indent=2))
+        write_json(fixture_dir / "fixture.json", fixture)
     for first in range(begin, end, 24):
         frames = list(range(first, min(first + 24, end)))
         sheet = Image.new("RGB", (1296, 1652), (22, 22, 22))

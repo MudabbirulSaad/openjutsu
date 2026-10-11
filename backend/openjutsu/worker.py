@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 
+from .artifacts import write_npz
 from .media import audio, mux, normalize, probe, run, timeline, waveform
 from .tracking import (
     MASK_COLORS,
@@ -196,7 +197,7 @@ def stage(task):
         depths, _ = model.infer_video_depth(frames, fps, input_size=518, device="cuda", fp32=False)
         if len(depths) != meta["frames"]:
             raise ValueError("Depth frame count differs from normalized source")
-        np.savez_compressed(output / f"{source.stem}_depths.npz", depths=depths)
+        write_npz(output / f"{source.stem}_depths.npz", {"depths": depths})
         low, high = float(np.min(depths)), float(np.max(depths))
         colormap = matplotlib.colormaps["inferno"]
         colored = (

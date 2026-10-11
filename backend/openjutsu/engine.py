@@ -4,8 +4,12 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 from pathlib import Path
+from uuid import uuid4
+from zipfile import BadZipFile
 
+from .artifacts import atomic_write, read_json, sync_outputs, verify_outputs, write_json
 from .config import Secrets
 from .media import Media, digest, probe
 from .models import MODEL_SPECS, readiness
@@ -150,29 +154,66 @@ class Engine:
         output.mkdir(parents=True, exist_ok=True)
         manifest = output / "manifest.json"
         if manifest.exists():
-            result = json.loads(manifest.read_text())
-            if result.get("hashes") and all(
-                Path(path).is_file() and digest(path) == result["hashes"].get(kind)
-                for kind, path in result["paths"].items()
+            try:
+                result = read_json(manifest)
+                paths, hashes = result["paths"], result["hashes"]
+                if (
+                    not isinstance(paths, dict)
+                    or not isinstance(hashes, dict)
+                    or set(paths) != set(hashes)
+                ):
+                    raise ValueError("Incomplete cache manifest")
+                if any(
+                    not Path(path).is_file() or digest(path) != hashes[kind]
+                    for kind, path in paths.items()
+                ):
+                    raise ValueError("Cached artifact bytes differ")
+                verify_outputs(paths, name, source, job["recipe"], output, kwargs)
+                if any(digest(path) != hashes[kind] for kind, path in paths.items()):
+                    raise ValueError("Cached artifact changed during verification")
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                RuntimeError,
+                EOFError,
+                BadZipFile,
+                zlib.error,
             ):
+                # Preserve the rejected receipt and files; regeneration uses a new directory.
+                rejected = output / f"rejected-manifest-{uuid4().hex}.json"
+                contents = manifest.read_bytes()
+
+                def retained(path):
+                    if path.read_bytes() != contents:
+                        raise ValueError("Rejected manifest differs on readback")
+
+                atomic_write(rejected, lambda stream: stream.write(contents), retained)
+            else:
+                if self.stop_event.is_set() or self.store.get("job", job["id"])["cancel"]:
+                    raise InterruptedError("Local processing stopped")
                 self.store.update("job", job["id"], {"progress": {"stage": name, "cached": True}})
-                return result["paths"]
+                return paths
+        # An interrupted/failed attempt can never overwrite an earlier output or receipt.
+        workspace = output / "runs" / uuid4().hex
+        workspace.mkdir(parents=True)
         task = {
             "stage": name,
             "source": str(source),
-            "output": str(output),
+            "output": str(workspace),
             "models": str(self.config.model_dir),
             "recipe": job["recipe"],
             **kwargs,
         }
-        task_path = output / "task.json"
-        task_path.write_text(json.dumps(task))
+        task_path = workspace / "task.json"
+        write_json(task_path, task)
         self.store.update("job", job["id"], {"progress": {"stage": name, "cached": False}})
         env = dict(os.environ)
         env["HF_HUB_OFFLINE"] = "1"
         env["TRANSFORMERS_OFFLINE"] = "1"
         env["TORCH_HOME"] = str(self.config.model_dir / "torch")
-        error_path = output / "worker-error.log"
+        error_path = workspace / "worker-error.log"
         result = None
         with error_path.open("w") as errors:
             self.process = subprocess.Popen(
@@ -224,20 +265,28 @@ class Engine:
         paths = result["result"]
         if not all(Path(p).is_file() for p in paths.values()):
             raise RuntimeError("Worker result contains missing artifacts")
-        manifest.write_text(
-            json.dumps(
-                {
-                    "paths": paths,
-                    "hashes": {kind: digest(path) for kind, path in paths.items()},
-                    "seconds": result["seconds"],
-                    "peak_mb": result["peak_mb"],
-                    "stage": name,
-                    "parameters": parameters,
-                    "model": model,
-                    "model_version": model_stamp,
-                    "inputs": dependencies,
-                }
-            )
+        hashes = {kind: digest(path) for kind, path in paths.items()}
+        verification = verify_outputs(paths, name, source, job["recipe"], workspace, kwargs)
+        sync_outputs(paths)
+        if hashes != {kind: digest(path) for kind, path in paths.items()}:
+            raise ValueError("Worker artifact changed during verification")
+        if self.stop_event.is_set() or self.store.get("job", job["id"])["cancel"]:
+            raise InterruptedError("Local processing stopped before cache publication")
+        write_json(
+            manifest,
+            {
+                "paths": paths,
+                "hashes": hashes,
+                "integrity_version": 1,
+                "verification": verification,
+                "seconds": result["seconds"],
+                "peak_mb": result["peak_mb"],
+                "stage": name,
+                "parameters": parameters,
+                "model": model,
+                "model_version": model_stamp,
+                "inputs": dependencies,
+            },
         )
         self.store.put(
             "benchmark",
