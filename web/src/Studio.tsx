@@ -64,6 +64,7 @@ export function Studio({ connected }: { connected: boolean }) {
     [frame, setFrame] = useState(0),
     [playing, setPlaying] = useState(false),
     [tab, setTab] = useState("conditioning"),
+    [outputView, setOutputView] = useState("delivery"),
     [compare, setCompare] = useState(false),
     [selected, setSelected] = useState(1),
     [exclude, setExclude] = useState(false),
@@ -213,7 +214,11 @@ export function Studio({ connected }: { connected: boolean }) {
   const artifact = artifacts[tab] || artifacts.conditioning;
   const generated = stage === "generate" || stage === "export";
   const chosen =
-    generated && activeAttempt?.preview ? activeAttempt.preview : artifact?.id;
+    stage === "export" && outputView !== "preview" && artifacts[outputView]
+      ? artifacts[outputView].id
+      : generated && activeAttempt?.preview
+        ? activeAttempt.preview
+        : artifact?.id;
   const sourceUrl = `/api/jobs/${id}/source-preview?revision=${job.revision}`;
   const primary =
     stage === "prepare" ? sourceUrl : content(chosen) || sourceUrl;
@@ -984,6 +989,20 @@ export function Studio({ connected }: { connected: boolean }) {
           )}
           <section>
             <h2>Deliverables</h2>
+            <Field label="View output">
+              <select
+                value={outputView}
+                onChange={(e) => setOutputView(e.target.value)}
+              >
+                <option value="delivery">
+                  Final delivery{artifacts.delivery ? "" : " · waiting"}
+                </option>
+                <option value="preview">480p preview · restored audio</option>
+                {artifacts.master && (
+                  <option value="master">Final master</option>
+                )}
+              </select>
+            </Field>
             {job.cost_per_accepted_second !== null && (
               <p className="small">
                 Settled API cost per accepted second:{" "}
@@ -1001,7 +1020,13 @@ export function Studio({ connected }: { connected: boolean }) {
                 >
                   <Download size={16} />
                   <span>
-                    {k === "master" ? "Native master" : "Browser delivery"}
+                    {k === "master"
+                      ? artifacts[k].producer.includes("upscaled")
+                        ? "Upscaled master"
+                        : artifacts[k].producer.includes("native")
+                          ? "Native master"
+                          : "Generation master"
+                      : "Browser delivery"}
                     <small>
                       {artifacts[k].metadata.width} ×{" "}
                       {artifacts[k].metadata.height} · {artifacts[k].producer}
@@ -1111,9 +1136,13 @@ export function Studio({ connected }: { connected: boolean }) {
             <span>
               {stage === "prepare"
                 ? "Original · select subjects"
-                : generated
-                  ? `${activeAttempt?.provider || "No generation"} · ${activeAttempt?.parent ? "native" : "preview"}`
-                  : tab}
+                : stage === "export" && chosen === artifacts.delivery?.id
+                  ? `Final delivery · ${artifacts.delivery.metadata.width} × ${artifacts.delivery.metadata.height}`
+                  : stage === "export" && chosen === artifacts.master?.id
+                    ? "Final master"
+                    : generated
+                      ? `${activeAttempt?.provider || "No generation"} · ${activeAttempt?.parent ? "native" : "preview"}`
+                      : tab}
             </span>
             <span>
               {compare

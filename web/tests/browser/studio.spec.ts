@@ -75,9 +75,16 @@ test("four stages, real approvals, duplicate-click prevention, export and themes
     .getByRole("radio", { name: /Original preview resolution/ })
     .check();
   await page.getByRole("button", { name: "Finalize selected output" }).click();
-  await expect(page.getByRole("link", { name: /Native master/ })).toBeVisible({
+  await expect(
+    page.getByRole("link", { name: /Generation master/ }),
+  ).toBeVisible({
     timeout: 20000,
   });
+  await expect(page.locator(".viewer-heading")).toContainText("Final delivery");
+  await page
+    .getByRole("combobox", { name: "View output" })
+    .selectOption("preview");
+  await expect(page.locator(".viewer-heading")).toContainText("preview");
   for (const theme of ["light", "dark"]) {
     await page
       .getByRole("combobox", { name: "Color theme" })
@@ -140,4 +147,86 @@ test("read-only reconnection state", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Projects", exact: true }),
   ).toBeVisible();
+});
+
+test("three cast intervals and consent persist; one-generation cap survives reload", async ({
+  page,
+  request,
+}) => {
+  const fixture = await request.get("/api/test-fixture").then((r) => r.json());
+  await page.goto(`/studio/${fixture.job}/prepare`);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Subject 3", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Add", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("combobox", { name: "Reference category" })
+    .selectOption("human");
+  await page
+    .getByLabel("This person consents to this video generation")
+    .check();
+  await page.getByRole("spinbutton", { name: "Frame", exact: true }).fill("24");
+  await page.getByRole("button", { name: "Add tracking interval" }).click();
+  await page
+    .getByRole("spinbutton", { name: "Interval 1 end frame" })
+    .fill("72");
+  await page.getByRole("button", { name: "Add point", exact: true }).click();
+  await page.getByRole("button", { name: "Save preparation settings" }).click();
+  await expect(
+    page.locator(".studio-meta").getByText("Revision 2", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Subject 3", exact: true }).click();
+  await expect(
+    page.getByRole("spinbutton", { name: "Interval 1 start frame" }),
+  ).toHaveValue("24");
+  await expect(
+    page.getByLabel("This person consents to this video generation"),
+  ).toBeChecked();
+  const saved = await request
+    .get(`/api/jobs/${fixture.job}`)
+    .then((r) => r.json());
+  expect(saved.approval).toBeNull();
+  expect(saved.recipe.subjects[2].annotations[0].frame).toBe(24);
+
+  const single = await request.get("/api/test-fixture").then((r) => r.json());
+  await page.goto(`/studio/${single.job}/review`);
+  await page
+    .getByRole("button", { name: "Approve upload preparation" })
+    .click();
+  await page
+    .getByRole("spinbutton", { name: "Generation submission limit" })
+    .fill("1");
+  await page.getByRole("button", { name: "Save limit", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Finished output plan" })
+    .selectOption("original");
+  await page.getByRole("button", { name: "Submit 480p preview" }).click();
+  await expect(
+    page.getByRole("button", { name: "Accept this preview" }),
+  ).toBeEnabled({ timeout: 15000 });
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Submit 480p preview" }),
+  ).toBeDisabled();
+  const job = await request
+    .get(`/api/jobs/${single.job}`)
+    .then((r) => r.json());
+  expect(job.generation_limit).toBe(1);
+  expect(job.attempts).toHaveLength(1);
+  const quotes = await request
+    .get(`/api/jobs/${single.job}/quotes?finish=original`)
+    .then((r) => r.json());
+  const repeated = await request.post(`/api/jobs/${single.job}/previews`, {
+    data: {
+      revision: job.revision,
+      quote_id: quotes.find((q: { eligible: boolean }) => q.eligible).id,
+      operation_id: "independent-second-operation",
+      pilot: true,
+    },
+  });
+  expect(repeated.status()).toBe(409);
 });
