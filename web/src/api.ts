@@ -11,12 +11,16 @@ export type Subject = {
   kind: "human" | "fictional";
   portrait_asset: string | null;
   annotations: Annotation[];
+  intervals?: { start: number; end: number }[];
+  consent_confirmed?: boolean;
 };
 export type Recipe = {
   start: number;
   end: number;
   mode: "advanced" | "fast" | "combined";
   subjects: Subject[];
+  allow_empty_frames?: boolean;
+  argolink_mode?: "reference" | "edit";
   pitch: number;
   pitch_backend: "librosa" | "rubberband";
   segmentation: "sam2-large" | "sam2-small" | "sam3";
@@ -193,6 +197,8 @@ export const defaultRecipe: Recipe = {
   end: 5,
   mode: "advanced",
   subjects: [],
+  allow_empty_frames: false,
+  argolink_mode: "reference",
   pitch: 3,
   pitch_backend: "librosa",
   segmentation: "sam2-large",

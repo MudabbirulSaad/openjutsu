@@ -11,6 +11,7 @@ from .media import Media, digest, probe
 from .models import MODEL_SPECS, readiness
 from .providers import Ambiguous, Provider, Rejected, Uploads, account
 from .store import Conflict, fingerprint
+from .tracking import validate_bindings
 
 
 class Engine:
@@ -72,12 +73,12 @@ class Engine:
             for ref in s["references"]:
                 if self.store.get("asset", ref)["kind"] != "image":
                     raise Conflict("Subject references must be images")
-            if r["mode"] != "fast" and not any(
-                a["frame"] == 0 and (a["points"] or a["box"]) for a in s["annotations"]
-            ):
-                raise Conflict("Anchor each subject on the first normalized frame")
             if any(a["frame"] >= round((r["end"] - r["start"]) * 24) for a in s["annotations"]):
                 raise Conflict("A correction frame is beyond the selected clip")
+        if r["mode"] != "fast":
+            validate_bindings(r)
+        if r["segmentation"] == "sam3" and any(s.get("intervals") for s in r["subjects"]):
+            raise Conflict("Shot intervals currently require SAM 2.1")
         missing = [
             m
             for m in self.required_models(job)
@@ -133,7 +134,7 @@ class Engine:
         }
         key = fingerprint(
             {
-                "version": 2 if name == "depth" else 1,
+                "version": 2 if name in {"depth", "mask"} else 1,
                 "stage": name,
                 "inputs": dependencies,
                 "parameters": parameters,
@@ -312,9 +313,15 @@ class Engine:
                     clip,
                     {
                         "subjects": [
-                            {"id": s["id"], "annotations": s["annotations"]} for s in r["subjects"]
+                            {
+                                "id": s["id"],
+                                "annotations": s["annotations"],
+                                "intervals": s.get("intervals", []),
+                            }
+                            for s in r["subjects"]
                         ],
                         "profile": r["segmentation"],
+                        "allow_empty_frames": r.get("allow_empty_frames", False),
                     },
                 )
             )

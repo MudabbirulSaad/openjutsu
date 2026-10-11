@@ -304,10 +304,12 @@ export function Studio({ connected }: { connected: boolean }) {
                 size="small"
                 disabled={
                   !job.available_actions.edit ||
-                  recipe.subjects.length >= (recipe.mode === "advanced" ? 2 : 1)
+                  recipe.subjects.length >= (recipe.mode === "advanced" ? 3 : 1)
                 }
                 onClick={() => {
-                  const n = recipe.subjects.some((s) => s.id === 1) ? 2 : 1;
+                  const n = [1, 2, 3].find(
+                    (id) => !recipe.subjects.some((s) => s.id === id),
+                  )!;
                   update({
                     subjects: [
                       ...recipe.subjects,
@@ -318,6 +320,8 @@ export function Studio({ connected }: { connected: boolean }) {
                         portrait_asset: null,
                         references: [],
                         annotations: [],
+                        intervals: [],
+                        consent_confirmed: false,
                       },
                     ],
                   });
@@ -368,9 +372,24 @@ export function Studio({ connected }: { connected: boolean }) {
                   </select>
                 </Field>
                 {subject.kind === "human" && (
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={subject.consent_confirmed || false}
+                      onChange={(e) =>
+                        updateSubject({
+                          ...subject,
+                          consent_confirmed: e.target.checked,
+                        })
+                      }
+                    />
+                    This person consents to this video generation
+                  </label>
+                )}
+                {subject.kind === "human" && (
                   <Field
                     label="BytePlus portrait asset"
-                    hint="Enroll the authorized portrait with the provider. An image upload alone does not authorize a portrait."
+                    hint="BytePlus requires enrollment. ArgoLink accepts reference photos with confirmed consent."
                   >
                     <input
                       placeholder="asset://…"
@@ -440,6 +459,84 @@ export function Studio({ connected }: { connected: boolean }) {
                   Full-body references help replace clothing, hands and
                   silhouette.
                 </p>
+                <p className="small">
+                  Tracking intervals use normalized frames; end is exclusive.
+                  Each interval starts a fresh track. No intervals means the
+                  whole clip.
+                </p>
+                {(subject.intervals || []).map((span, i) => (
+                  <div key={i}>
+                    <div className="field-grid">
+                      <Field label={`Interval ${i + 1} start frame`}>
+                        <input
+                          type="number"
+                          min={0}
+                          max={Math.round(duration * 24) - 1}
+                          value={span.start}
+                          onChange={(e) =>
+                            updateSubject({
+                              ...subject,
+                              intervals: subject.intervals!.map((v, j) =>
+                                j === i
+                                  ? { ...v, start: Number(e.target.value) }
+                                  : v,
+                              ),
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label={`Interval ${i + 1} end frame`}>
+                        <input
+                          type="number"
+                          min={1}
+                          max={Math.round(duration * 24)}
+                          value={span.end}
+                          onChange={(e) =>
+                            updateSubject({
+                              ...subject,
+                              intervals: subject.intervals!.map((v, j) =>
+                                j === i
+                                  ? { ...v, end: Number(e.target.value) }
+                                  : v,
+                              ),
+                            })
+                          }
+                        />
+                      </Field>
+                    </div>
+                    <Button size="small" onClick={() => setFrame(span.start)}>
+                      Go to interval {i + 1}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      onClick={() =>
+                        updateSubject({
+                          ...subject,
+                          intervals: subject.intervals!.filter(
+                            (_, j) => i !== j,
+                          ),
+                        })
+                      }
+                    >
+                      Remove interval {i + 1}
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  size="small"
+                  onClick={() =>
+                    updateSubject({
+                      ...subject,
+                      intervals: [
+                        ...(subject.intervals || []),
+                        { start: frame, end: Math.round(duration * 24) },
+                      ],
+                    })
+                  }
+                >
+                  Add tracking interval
+                </Button>
                 <Button
                   size="small"
                   variant="ghost"
@@ -456,8 +553,8 @@ export function Studio({ connected }: { connected: boolean }) {
               </>
             ) : (
               <p className="small">
-                Add a subject, bind a reference, then pause at frame 0 and
-                select the subject.
+                Add a subject, bind a reference, then select an anchor inside
+                each tracking interval.
               </p>
             )}
           </section>
@@ -597,6 +694,16 @@ export function Studio({ connected }: { connected: boolean }) {
                 onChange={(e) => update({ prompt: e.target.value })}
               />
             </Field>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={recipe.allow_empty_frames || false}
+                onChange={(e) =>
+                  update({ allow_empty_frames: e.target.checked })
+                }
+              />
+              Allow empty masks and report them for review
+            </label>
             <Button
               onClick={save}
               disabled={
@@ -687,6 +794,19 @@ export function Studio({ connected }: { connected: boolean }) {
                 <Download size={14} />
                 Download exact upload media
               </a>
+            )}
+            {artifacts.tracking && (
+              <p className="small">
+                <a
+                  className="text-link"
+                  href={content(artifacts.tracking.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Inspect empty frames and tracking intervals
+                </a>
+                Empty masks require review before approving this revision.
+              </p>
             )}
           </section>
           <section>

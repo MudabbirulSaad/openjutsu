@@ -1,11 +1,13 @@
 """One isolated model stage. Inputs/outputs are local files; stdout is JSON events."""
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 from .media import audio, mux, normalize, probe, run, timeline, waveform
+from .tracking import MASK_COLORS, intervals
 
 
 def emit(**event):
@@ -255,47 +257,78 @@ def stage(task):
                 device="cuda",
             )
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                state = predictor.init_state(
-                    str(frames_dir), offload_video_to_cpu=True, offload_state_to_cpu=True
-                )
                 for subject in r["subjects"]:
-                    for annotation in subject["annotations"]:
-                        pts = np.array(
-                            [
-                                [p["x"] * meta["width"], p["y"] * meta["height"]]
-                                for p in annotation["points"]
-                            ],
-                            dtype=np.float32,
+                    for number, span in enumerate(intervals(subject, count)):
+                        begin, end = span["start"], span["end"]
+                        shot = output / f"subject-{subject['id']}-interval-{number}"
+                        shot.mkdir(exist_ok=True)
+                        for frame in range(begin, end):
+                            target = shot / f"{frame - begin:06}.jpg"
+                            if not target.exists():
+                                os.link(frames_dir / f"{frame:06}.jpg", target)
+                        state = predictor.init_state(
+                            str(shot), offload_video_to_cpu=True, offload_state_to_cpu=True
                         )
-                        box = (
-                            np.array(annotation["box"])
-                            * [meta["width"], meta["height"], meta["width"], meta["height"]]
-                            if annotation.get("box")
-                            else None
-                        )
-                        predictor.add_new_points_or_box(
-                            state,
-                            annotation["frame"],
-                            subject["id"],
-                            points=pts if len(pts) else None,
-                            labels=np.array([int(p["include"]) for p in annotation["points"]])
-                            if len(pts)
-                            else None,
-                            box=box,
-                        )
-                for index, ids, logits in predictor.propagate_in_video(state):
-                    for id, logit in zip(ids, logits):
-                        masks[index][(logit[0] > 0).cpu().numpy()] = int(id)
-                    emit(completed=index + 1, total=count)
+                        anchors = [a for a in subject["annotations"] if begin <= a["frame"] < end]
+                        for annotation in anchors:
+                            pts = np.array(
+                                [
+                                    [p["x"] * meta["width"], p["y"] * meta["height"]]
+                                    for p in annotation["points"]
+                                ],
+                                dtype=np.float32,
+                            )
+                            box = (
+                                np.array(annotation["box"])
+                                * [meta["width"], meta["height"], meta["width"], meta["height"]]
+                                if annotation.get("box")
+                                else None
+                            )
+                            predictor.add_new_points_or_box(
+                                state,
+                                annotation["frame"] - begin,
+                                subject["id"],
+                                points=pts if len(pts) else None,
+                                labels=np.array([int(p["include"]) for p in annotation["points"]])
+                                if len(pts)
+                                else None,
+                                box=box,
+                            )
+                        anchor = min(a["frame"] for a in anchors) - begin
+                        for reverse in (False, True):
+                            if reverse and anchor == 0:
+                                continue
+                            for index, ids, logits in predictor.propagate_in_video(
+                                state, start_frame_idx=anchor, reverse=reverse
+                            ):
+                                for id, logit in zip(ids, logits):
+                                    masks[begin + index][(logit[0] > 0).cpu().numpy()] = int(id)
+                                emit(completed=begin + index + 1, total=count)
+                        del state
+                        torch.cuda.empty_cache()
         missing = [int(i) for i in np.where(masks.reshape(count, -1).max(axis=1) == 0)[0]]
-        if missing:
+        if missing and not r.get("allow_empty_frames", False):
             raise ValueError(f"No subject mask on frames {missing[:20]}; add correction anchors")
+        report = output / "tracking.json"
+        report.write_text(
+            json.dumps(
+                {
+                    "empty_frames": missing,
+                    "frames": count,
+                    "intervals": {str(s["id"]): intervals(s, count) for s in r["subjects"]},
+                }
+            )
+        )
         np.savez_compressed(output / "masks.npz", masks=masks)
-        colors = np.array([[0, 0, 0], [230, 190, 40], [40, 150, 250]], dtype=np.uint8)
+        colors = np.array(MASK_COLORS, dtype=np.uint8)
         encode_frames(
             (colors[m] for m in masks), output / "masks.mp4", meta["width"], meta["height"]
         )
-        return {"mask": str(output / "masks.mp4"), "mask_data": str(output / "masks.npz")}
+        return {
+            "mask": str(output / "masks.mp4"),
+            "mask_data": str(output / "masks.npz"),
+            "tracking": str(report),
+        }
     if kind == "composite":
         import cv2
         import numpy as np
@@ -522,7 +555,6 @@ def stage(task):
             sys.argv = args
             sys.path.insert(0, str(repo))
             original_dir = Path.cwd()
-            import os
 
             try:
                 os.chdir(repo)

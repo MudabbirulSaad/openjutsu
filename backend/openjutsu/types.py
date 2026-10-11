@@ -27,12 +27,25 @@ class Annotation(Strict):
         return self
 
 
+class FrameInterval(Strict):
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.end <= self.start:
+            raise ValueError("Interval end must follow its start (end is exclusive)")
+        return self
+
+
 class Subject(Strict):
-    id: int = Field(ge=1, le=2)
+    id: int = Field(ge=1, le=3)
     name: str = Field(default="Subject", max_length=100)
     references: list[str] = Field(default_factory=list, max_length=8)
     kind: Literal["human", "fictional"] = "human"
     portrait_asset: str | None = None
+    consent_confirmed: bool = False
+    intervals: list[FrameInterval] = Field(default_factory=list, max_length=30)
     annotations: list[Annotation] = Field(default_factory=list, max_length=100)
 
 
@@ -40,7 +53,9 @@ class Recipe(Strict):
     start: float = Field(default=0, ge=0)
     end: float = Field(default=5, gt=0)
     mode: Literal["advanced", "fast", "combined"] = "advanced"
-    subjects: list[Subject] = Field(default_factory=list, max_length=2)
+    subjects: list[Subject] = Field(default_factory=list, max_length=3)
+    allow_empty_frames: bool = False
+    argolink_mode: Literal["edit", "reference"] = "reference"
     pitch: float = Field(default=3, ge=-12, le=12)
     pitch_backend: Literal["librosa", "rubberband"] = "librosa"
     segmentation: Literal["sam2-large", "sam2-small", "sam3"] = "sam2-large"
@@ -60,6 +75,15 @@ class Recipe(Strict):
             raise ValueError("Select a 4–30 second clip")
         if len({s.id for s in self.subjects}) != len(self.subjects):
             raise ValueError("Subject IDs must be unique")
+        count = round((self.end - self.start) * 24)
+        for subject in self.subjects:
+            previous = 0
+            for interval in subject.intervals:
+                if interval.start < previous or interval.end > count:
+                    raise ValueError(
+                        "Intervals must be ordered, non-overlapping, and inside the clip"
+                    )
+                previous = interval.end
         if self.mode in {"fast", "combined"} and len(self.subjects) > 1:
             raise ValueError("Mesh modes initially support one subject")
         if self.audio == "custom" and not self.custom_audio:
