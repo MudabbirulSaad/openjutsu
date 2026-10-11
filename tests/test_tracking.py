@@ -46,3 +46,14 @@ def test_exclusive_boundaries_and_anchor_required_in_each_interval():
 def test_mesh_does_not_claim_three_person_support():
     with pytest.raises(ValueError, match="one subject"):
         Recipe(mode="fast", subjects=[{"id": 1}, {"id": 2}])
+
+
+def test_long_mask_storage_survives_exact_roundtrip(tmp_path):
+    import numpy as np
+    from openjutsu.tracking import load_masks, save_masks
+
+    for count in (1, 8, 32, 64, 128, 432):
+        masks = np.zeros((count, 960, 540), dtype=np.uint8)
+        masks[:, 200:800, 100:400] = 1
+        path = save_masks(tmp_path, masks)
+        assert np.array_equal(load_masks(path), masks)

@@ -18,3 +18,29 @@ def validate_bindings(recipe):
 
 
 MASK_COLORS = [[0, 0, 0], [230, 190, 40], [40, 150, 250], [185, 100, 230]]
+
+
+def save_masks(folder, masks):
+    import os
+
+    import numpy as np
+
+    path = folder / "masks.npy"
+    temporary = folder / ".masks.tmp"
+    with temporary.open("wb") as stream:
+        np.save(stream, masks, allow_pickle=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(path)
+    return path
+
+
+def load_masks(path):
+    from pathlib import Path
+
+    import numpy as np
+
+    if Path(path).suffix == ".npy":
+        return np.load(path, mmap_mode="r", allow_pickle=False)
+    with np.load(path, allow_pickle=False) as archive:
+        return archive["masks"]

@@ -134,7 +134,7 @@ class Engine:
         }
         key = fingerprint(
             {
-                "version": 2 if name in {"depth", "mask"} else 1,
+                "version": 3 if name == "mask" else 2 if name == "depth" else 1,
                 "stage": name,
                 "inputs": dependencies,
                 "parameters": parameters,

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from .media import audio, mux, normalize, probe, run, timeline, waveform
-from .tracking import MASK_COLORS, intervals
+from .tracking import MASK_COLORS, intervals, load_masks, save_masks
 
 
 def emit(**event):
@@ -319,21 +319,21 @@ def stage(task):
                 }
             )
         )
-        np.savez_compressed(output / "masks.npz", masks=masks)
+        mask_data = save_masks(output, masks)
         colors = np.array(MASK_COLORS, dtype=np.uint8)
         encode_frames(
             (colors[m] for m in masks), output / "masks.mp4", meta["width"], meta["height"]
         )
         return {
             "mask": str(output / "masks.mp4"),
-            "mask_data": str(output / "masks.npz"),
+            "mask_data": str(mask_data),
             "tracking": str(report),
         }
     if kind == "composite":
         import cv2
         import numpy as np
 
-        masks = np.load(task["mask_data"])["masks"]
+        masks = load_masks(task["mask_data"])
         depths = iter(video_frames(task["depth"]))
 
         def frames():
