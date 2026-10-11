@@ -11,6 +11,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--tracking-fixture", help="Private Step 3 tracking candidate fixture directory"
     )
+    parser.addoption("--quality-fixture", help="Private Step 4 normal Engine audit directory")
 
 
 @pytest.fixture(scope="session")
@@ -47,3 +48,15 @@ def tracking_fixture(request):
     if not folder:
         pytest.skip("Private Step 3 candidate is opt-in; never included in Git/CI")
     return load_private_fixture(folder)
+
+
+@pytest.fixture(scope="session")
+def quality_fixture(request):
+    folder = request.config.getoption("--quality-fixture")
+    if not folder:
+        pytest.skip("Private normal Engine evidence is opt-in and never committed")
+    folder = Path(folder)
+    return (
+        json.loads((folder / "normal-quality-report.json").read_text()),
+        json.loads((folder / "quality-artifacts.json").read_text()),
+    )

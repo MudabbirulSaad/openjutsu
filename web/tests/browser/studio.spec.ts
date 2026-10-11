@@ -1,6 +1,38 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("quality warnings require inspection reasons in the Review interface", async ({
+  page,
+  request,
+}) => {
+  const fixture = await request.get("/api/test-fixture").then((r) => r.json());
+  await page.goto(`/studio/${fixture.job}/review`);
+  const approval = page.getByRole("button", {
+    name: "Approve upload preparation",
+  });
+  await expect(approval).toBeDisabled();
+  for (let subject = 1; subject <= 2; subject++) {
+    const finding = page
+      .locator(".quality-finding")
+      .filter({ hasText: `Subject ${subject}` })
+      .first();
+    await finding.locator("summary").click();
+    await expect(
+      finding.getByRole("button", { name: "Record review" }),
+    ).toBeDisabled();
+    await finding.getByLabel("Inspection decision").selectOption("inspected");
+    await finding
+      .getByLabel("Reason and evidence")
+      .fill(
+        `Inspected synthetic Subject ${subject} rectangle across every frame; no private appearance.`,
+      );
+    await finding.getByRole("button", { name: "Record review" }).click();
+    await expect(finding.getByText(/Recorded review:/)).toBeVisible();
+    if (subject === 1) await expect(approval).toBeDisabled();
+  }
+  await expect(approval).toBeEnabled();
+});
+
 test("four stages, real approvals, duplicate-click prevention, export and themes", async ({
   page,
   request,
@@ -22,6 +54,31 @@ test("four stages, real approvals, duplicate-click prevention, export and themes
   );
   await page.reload();
   await page.getByRole("link", { name: "Review", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Approve upload preparation" }),
+  ).toBeDisabled();
+  const report = await request
+    .get(`/api/jobs/${fixture.job}/quality`)
+    .then((r) => r.json());
+  for (const finding of report.findings.filter(
+    (f: { reviewable: boolean }) => f.reviewable,
+  )) {
+    const review = await request.post(
+      `/api/jobs/${fixture.job}/quality-review`,
+      {
+        data: {
+          revision: 1,
+          report_id: report.report_id,
+          finding_id: finding.id,
+          resolution: "inspected",
+          reason:
+            "Synthetic rectangles inspected across all frames; source evidence contains no private person.",
+        },
+      },
+    );
+    expect(review.status()).toBe(200);
+  }
+  await page.reload();
   await page.getByText("Compare with original", { exact: true }).click();
   await expect(page.locator(".comparison video")).toHaveCount(2);
   await page
@@ -224,6 +281,27 @@ test("three cast intervals and consent persist; one-generation cap survives relo
   expect(saved.recipe.subjects[2].annotations[0].frame).toBe(24);
 
   const single = await request.get("/api/test-fixture").then((r) => r.json());
+  const quality = await request
+    .get(`/api/jobs/${single.job}/quality`)
+    .then((r) => r.json());
+  for (const finding of quality.findings.filter(
+    (f: { reviewable: boolean }) => f.reviewable,
+  )) {
+    const reviewed = await request.post(
+      `/api/jobs/${single.job}/quality-review`,
+      {
+        data: {
+          revision: 1,
+          report_id: quality.report_id,
+          finding_id: finding.id,
+          resolution: "inspected",
+          reason:
+            "Synthetic rectangles inspected for this spending-limit contract test.",
+        },
+      },
+    );
+    expect(reviewed.status()).toBe(200);
+  }
   await page.goto(`/studio/${single.job}/review`);
   await page
     .getByRole("button", { name: "Approve upload preparation" })

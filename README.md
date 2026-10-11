@@ -34,7 +34,7 @@ git clone https://github.com/MudabbirulSaad/openjutsu.git
 cd openjutsu
 bash scripts/setup.sh
 runtime="$HOME/.local/share/openjutsu"
-"$runtime/venv/bin/python" scripts/install_models.py depth sam2-large mesh audio whisper
+"$runtime/venv/bin/python" scripts/install_models.py depth sam2-large mesh quality audio whisper
 ```
 
 Build the studio in the checkout, either on Windows or in Linux:
@@ -57,6 +57,10 @@ bash scripts/serve.sh
 Open **http://127.0.0.1:9780**. The backend serves the production frontend. For UI development, run `pnpm --dir web dev`; its `/api` proxy uses port 9780. Port conflicts and WSL forwarding are covered in [troubleshooting](docs/troubleshooting.md).
 
 Model installation is explicit and separate from application installation. See [models and licenses](docs/setup/models.md) for optional Qwen, SeedVR2, Real-ESRGAN, SAM 2.1 Small and the experimental gated SAM 3 adapter. Setup pins CPU and CUDA dependencies in separate environments; it does not silently fetch checkpoints during a job.
+
+Preparation approval now requires the [quality audit and reasoned review](docs/preparation-quality.md).
+Advanced conditioning is validated against the exact source, masks and structural guide. Unresolved
+warnings block approval; Fast/Combined need a mesh-specific attribution validator before generation.
 
 ## Four-stage workflow
 

@@ -62,12 +62,72 @@ class Subject(Strict):
     annotations: list[Annotation] = Field(default_factory=list, max_length=100)
 
 
+class CriticalFrame(Strict):
+    subject_id: int = Field(ge=1, le=3)
+    frame: int = Field(ge=0)
+
+
+class QualityPolicy(Strict):
+    face_hull_coverage: float = Field(default=0.995, ge=0.95, le=1)
+    critical_hull_coverage: float = Field(default=0.999, ge=0.99, le=1)
+    anatomy_coverage: float = Field(default=0.98, ge=0.9, le=1)
+    background_selection: float = Field(default=0.005, ge=0, le=0.05)
+    detection_confidence: float = Field(default=0.5, ge=0.3, le=1)
+    landmark_confidence: float = Field(default=0.9, ge=0.5, le=1)
+    structural_mae: float = Field(default=12, ge=0, le=30)
+    source_similarity_mae: float = Field(default=6, ge=0, le=15)
+    critical_frames: list[CriticalFrame] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def thresholds(self):
+        if self.critical_hull_coverage < self.face_hull_coverage:
+            raise ValueError("Critical face coverage must be at least the broad face threshold")
+        return self
+
+
+class QualityRegion(Strict):
+    """Source-reviewed evidence, separate from prompts consumed by SAM."""
+
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    subject_id: int | None = Field(default=None, ge=1, le=3)
+    part: Literal[
+        "face",
+        "head",
+        "hair",
+        "neck",
+        "torso",
+        "arm",
+        "hand",
+        "leg",
+        "person",
+        "background",
+        "reflection",
+    ]
+    disposition: Literal["replace", "preserve", "uncertain"]
+    box: tuple[float, float, float, float]
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def valid(self):
+        x0, y0, x1, y1 = self.box
+        if self.end <= self.start or not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+            raise ValueError("Quality evidence needs an ordered frame range and normalized box")
+        if not self.reason.strip():
+            raise ValueError("Quality evidence needs a source-review reason")
+        if self.disposition == "replace" and self.subject_id is None:
+            raise ValueError("Replacement evidence needs an explicit cast ID")
+        return self
+
+
 class Recipe(Strict):
     start: float = Field(default=0, ge=0)
     end: float = Field(default=5, gt=0)
     mode: Literal["advanced", "fast", "combined"] = "advanced"
     subjects: list[Subject] = Field(default_factory=list, max_length=3)
     allow_empty_frames: bool = False
+    quality_policy: QualityPolicy = Field(default_factory=QualityPolicy)
+    quality_regions: list[QualityRegion] = Field(default_factory=list, max_length=1000)
     argolink_mode: Literal["edit", "reference"] = "reference"
     pitch: float = Field(default=3, ge=-12, le=12)
     pitch_backend: Literal["librosa", "rubberband"] = "librosa"
@@ -89,6 +149,11 @@ class Recipe(Strict):
         if len({s.id for s in self.subjects}) != len(self.subjects):
             raise ValueError("Subject IDs must be unique")
         count = round((self.end - self.start) * 24)
+        ids = {s.id for s in self.subjects}
+        for evidence in [*self.quality_policy.critical_frames, *self.quality_regions]:
+            frame = evidence.frame if isinstance(evidence, CriticalFrame) else evidence.end - 1
+            if frame >= count or evidence.subject_id is not None and evidence.subject_id not in ids:
+                raise ValueError("Quality evidence must refer to this clip and its cast")
         for subject in self.subjects:
             previous = 0
             for interval in subject.intervals:

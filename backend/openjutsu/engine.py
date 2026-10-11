@@ -41,6 +41,7 @@ class Engine:
     def required_models(self, job):
         r = job["recipe"]
         required = []
+        required.extend(["mesh", "quality"])
         source = self.store.get("asset", job["source"])
         if source["metadata"]["has_audio"] and (
             r["audio"] == "original" or r["custom_mix_background"]
@@ -57,7 +58,7 @@ class Engine:
             required.append("whisper")
         if r["describe"]:
             required.append("describe")
-        return required
+        return list(dict.fromkeys(required))
 
     def prepare(self, id, revision):
         job = self.store.get("job", id)
@@ -137,7 +138,7 @@ class Engine:
         }
         key = fingerprint(
             {
-                "version": 5 if name == "mask" else 2 if name == "depth" else 1,
+                "version": 6 if name == "mask" else 2 if name == "depth" else 1,
                 "stage": name,
                 "inputs": dependencies,
                 "parameters": parameters,
@@ -350,6 +351,26 @@ class Engine:
             kind: self.media.artifact(job, kind, path, "local preparation")["id"]
             for kind, path in paths.items()
         }
+        from .quality_gate import make_binding
+
+        binding = make_binding(
+            job,
+            self.store.get("asset", job["source"]),
+            {kind: self.store.get("artifact", id) for kind, id in artifacts.items()},
+        )
+        quality = self.run_stage(
+            job,
+            "quality",
+            clip,
+            {"binding": binding, "version": 3},
+            binding=binding,
+            paths=paths,
+            face_model=str(self.config.model_dir / "face_landmarker.task"),
+            pose_model=str(self.config.model_dir / "pose_landmarker.task"),
+        )
+        artifacts["quality"] = self.media.artifact(
+            job, "quality", quality["quality"], "complete preparation quality audit"
+        )["id"]
         self.store.update(
             "job",
             job["id"],
@@ -359,6 +380,7 @@ class Engine:
                 "artifacts": artifacts,
                 "progress": None,
                 "approval": None,
+                "quality_reviews": [],
             },
         )
 
@@ -469,6 +491,9 @@ class Engine:
         provider = None
         submitted = False
         try:
+            from .quality_gate import require_quality
+
+            require_quality(self.store.get("job", a["job"]), self.store.get, approved=True)
             settings = self.secrets.read().get(a["provider"], {})
             if account(settings) != a["account"]:
                 raise Rejected("Restore the original provider account credentials")

@@ -302,7 +302,10 @@ def stage(task):
                             emit(completed=begin + index + 1, total=count)
                         torch.cuda.empty_cache()
         report = output / "tracking.json"
-        report.write_text(json.dumps(tracking_report(masks, r["subjects"])))
+        tracking = tracking_report(masks, r["subjects"])
+        tracking["collision_policy"] = "reject_before_mutation"
+        tracking["collisions"] = 0
+        report.write_text(json.dumps(tracking))
         mask_data = save_masks(output, masks)
         colors = np.array(MASK_COLORS, dtype=np.uint8)
         encode_frames(
@@ -313,6 +316,13 @@ def stage(task):
             "mask_data": str(mask_data),
             "tracking": str(report),
         }
+    if kind == "quality":
+        from .quality_runtime import audit_artifacts
+
+        report = audit_artifacts(r, task["binding"], task["paths"], models, emit)
+        path = output / "quality.json"
+        path.write_text(json.dumps(report))
+        return {"quality": str(path)}
     if kind == "composite":
         import cv2
         import numpy as np

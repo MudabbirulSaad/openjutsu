@@ -125,6 +125,7 @@ class Store:
             "spent": 0,
             "reserved": 0,
             "approval": None,
+            "quality_reviews": [],
             "preview_approval": None,
             "artifacts": {},
             "progress": None,
@@ -162,6 +163,7 @@ class Store:
                 recipe=recipe,
                 revision=revision + 1,
                 approval=None,
+                quality_reviews=[],
                 preview_approval=None,
                 status="imported",
                 stage="prepare",
@@ -196,9 +198,13 @@ class Store:
             else:
                 if job["status"] != "review" or "conditioning" not in job["artifacts"]:
                     raise Conflict("Prepare and review the conditioning clip first")
+                from .quality_gate import require_quality
+
+                quality = require_quality(job, lambda kind, key: self._get(db, kind, key))
                 job["approval"] = {
                     "revision": revision,
                     "artifact": job["artifacts"]["conditioning"],
+                    "quality": quality,
                 }
                 job["status"] = "approved"
                 job["stage"] = "generate"
@@ -236,6 +242,9 @@ class Store:
                 raise Conflict("Approve this preparation first")
             if quote.get("artifact") and quote["artifact"] != job["approval"]["artifact"]:
                 raise Conflict("Refresh the quote after preparation changes")
+            from .quality_gate import require_quality
+
+            require_quality(job, lambda kind, key: self._get(db, kind, key), approved=True)
             if not quote["eligible"] or (not quote["qualified"] and not pilot):
                 raise Conflict(quote.get("reason") or "A qualification pilot is required")
             if self._unknown(db, job_id) or job["status"] in {
@@ -279,6 +288,51 @@ class Store:
             self._event(db, job_id, "submission_intent", attempt=attempt["id"])
             return attempt
 
+    def quality_report(self, id, strict=False):
+        from .quality_gate import read_quality
+
+        with self.transaction() as db:
+            return read_quality(
+                self._get(db, "job", id), lambda kind, key: self._get(db, kind, key), strict=strict
+            )
+
+    def review_quality(self, id, revision, report_id, finding_id, resolution, reason):
+        from .quality import apply_reviews
+        from .quality_gate import read_quality
+
+        if len(reason.strip()) < 8:
+            raise Conflict("Give an explicit inspection reason of at least eight characters")
+        with self.transaction() as db:
+            job = self._get(db, "job", id)
+            self.check_revision(job, revision)
+            if job["status"] not in {"review", "approved"}:
+                raise Conflict("Prepare the current revision before reviewing findings")
+            report = read_quality(job, lambda kind, key: self._get(db, kind, key))
+            if report["report_id"] != report_id:
+                raise Conflict("Review belongs to a stale quality report")
+            target = next((f for f in report["findings"] if f["id"] == finding_id), None)
+            if target is None:
+                raise Conflict("Quality finding not found")
+            entry = {
+                "report_id": report_id,
+                "report_hash": report["report_hash"],
+                "finding_id": finding_id,
+                "resolution": resolution,
+                "reason": reason.strip(),
+                "time": time.time(),
+            }
+            try:
+                apply_reviews({"findings": [target]}, [entry])
+            except ValueError as exc:
+                raise Conflict(str(exc)) from exc
+            job["quality_reviews"] = [
+                r for r in job.get("quality_reviews", []) if r["finding_id"] != finding_id
+            ] + [entry]
+            job.update(approval=None, status="review", stage="review")
+            self._put(db, "job", job)
+            self._event(db, id, "quality_review", **entry)
+            return job
+
     def settle(self, id, cost=None, failed=False):
         with self.transaction() as db:
             a = self._get(db, "attempt", id)
@@ -309,6 +363,8 @@ class Store:
                 (id, job_id, kind, json.dumps(payload), "queued"),
             )
             job.update(status="queued", cancel=False, error=None)
+            if kind == "prepare":
+                job.update(approval=None, quality_reviews=[])
             self._put(db, "job", job)
             self._event(db, job_id, "queued", task=id)
             return id

@@ -16,6 +16,7 @@ MODEL_SPECS = {
     "sam2-small": {"package": "sam2", "file": "sam2.1_hiera_small.pt", "license": "Apache-2.0"},
     "sam3": {"package": "sam3", "file": "sam3.pt", "license": "SAM License; gated checkpoint"},
     "mesh": {"package": "mediapipe", "file": "face_landmarker.task", "license": "Apache-2.0"},
+    "quality": {"package": "mediapipe", "file": "pose_landmarker.task", "license": "Apache-2.0"},
     "vocals": {
         "package": "demucs",
         "file": "torch/hub/checkpoints/955717e8-8726e21a.th",

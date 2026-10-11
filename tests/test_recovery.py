@@ -80,7 +80,6 @@ def test_preparation_includes_visibility_and_seed_in_mask_cache_inputs(local, mo
         )
 
     monkeypatch.setattr(engine, "run_stage", stage)
-    monkeypatch.setattr(engine.media, "artifact", lambda *args: {"id": "synthetic"})
     engine.preparation(job)
     subject = job["recipe"]["subjects"][0]
     assert captured[0]["subjects"][0]["visibility"] == subject["visibility"]
