@@ -1,4 +1,5 @@
 """Publish an ASR analysis into ignored local research files."""
+
 import argparse
 import json
 import re
@@ -45,12 +46,20 @@ def main():
         segment["uncertain"] = segment["start"] < 390 and segment["end"] > 382
         annotation = " [uncertain song excerpt]" if segment["uncertain"] else ""
         lines.append(f"[{stamp(segment['start'])}] {segment['text']}{annotation}")
-        subtitles.append(f"{i}\n{stamp(segment['start'], True)} --> {stamp(segment['end'], True)}\n{segment['text']}{annotation}\n")
+        subtitles.append(
+            f"{i}\n{stamp(segment['start'], True)} --> {stamp(segment['end'], True)}\n{segment['text']}{annotation}\n"
+        )
     text = "\n".join(lines) + "\n"
     (args.output / "video-transcript.txt").write_text(text, encoding="utf-8")
-    (args.output / "video-transcript.md").write_text("# Video transcript\n\nMachine transcription with terminology normalization. Raw words retained in JSON; uncertain passages require listening review. On-screen captions are documented separately in the research note.\n\n" + text, encoding="utf-8")
+    (args.output / "video-transcript.md").write_text(
+        "# Video transcript\n\nMachine transcription with terminology normalization. Raw words retained in JSON; uncertain passages require listening review. On-screen captions are documented separately in the research note.\n\n"
+        + text,
+        encoding="utf-8",
+    )
     (args.output / "video-transcript.srt").write_text("\n".join(subtitles), encoding="utf-8")
-    (args.output / "video-transcript.words.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    (args.output / "video-transcript.words.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":
