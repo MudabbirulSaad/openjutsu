@@ -583,8 +583,18 @@ def stage(task):
         return {"upscaled": str(path)}
     if kind == "export":
         path, proxy = output / "master.mp4", output / "delivery.mp4"
-        mux(source, task.get("audio"), path)
-        mux(path, task.get("audio"), proxy, browser=True)
+        count = task.get("frame_count", round((r["end"] - r["start"]) * 24))
+        mux(source, task.get("audio"), path, frame_count=count)
+        mux(
+            path,
+            task.get("audio"),
+            proxy,
+            browser=True,
+            frame_count=count,
+            target_size=task.get("delivery_size"),
+        )
+        if probe(path)["frames"] != count or probe(proxy)["frames"] != count:
+            raise ValueError("Finalized output does not match the approved timeline")
         return {"master": str(path), "delivery": str(proxy)}
     raise ValueError("Unknown stage")
 

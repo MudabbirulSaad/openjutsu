@@ -386,7 +386,18 @@ class Engine:
             if "final_audio" in job["artifacts"]
             else None
         )
-        paths.update(self.run_stage(job, "export", source, {}, audio=soundtrack))
+        count = round((job["recipe"]["end"] - job["recipe"]["start"]) * 24)
+        size = None
+        if data["route"] != "original":
+            reference = self.store.get("artifact", job["artifacts"]["normalized"])["metadata"]
+            ratio = reference["width"] / reference["height"]
+            size = (
+                [round(1080 * ratio / 2) * 2, 1080]
+                if ratio >= 1
+                else [1080, round(1080 / ratio / 2) * 2]
+            )
+        options = {"frame_count": count, "delivery_size": size}
+        paths.update(self.run_stage(job, "export", source, options, audio=soundtrack, **options))
         outputs = {
             k: self.media.artifact(
                 job,

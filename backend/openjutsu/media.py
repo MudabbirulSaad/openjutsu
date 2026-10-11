@@ -252,7 +252,7 @@ def audio(source, output, duration=None, start=0):
     run([*args, "-c:a", "pcm_f32le", "-y", str(output)])
 
 
-def mux(video, soundtrack, output, browser=False):
+def mux(video, soundtrack, output, browser=False, frame_count=None, target_size=None):
     args = ["ffmpeg", "-v", "error", "-i", str(video)]
     if soundtrack:
         args.extend(
@@ -272,9 +272,25 @@ def mux(video, soundtrack, output, browser=False):
         )
     else:
         args.extend(["-map", "0:v:0", "-an"])
-    args.extend(["-c:v", "libx264" if browser else "copy"])
-    if browser:
-        args.extend(["-vf", "fps=24", "-pix_fmt", "yuv420p", "-crf", "18"])
+    encode = browser or frame_count is not None
+    args.extend(["-c:v", "libx264" if encode else "copy"])
+    if encode:
+        filters = ["fps=24"]
+        if browser and target_size:
+            width, height = target_size
+            filters.extend(
+                [
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2",
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                    "setsar=1",
+                ]
+            )
+        if frame_count is not None:
+            filters.extend([f"trim=end_frame={frame_count}", "setpts=PTS-STARTPTS"])
+            args.extend(["-frames:v", str(frame_count)])
+        args.extend(
+            ["-vf", ",".join(filters), "-pix_fmt", "yuv420p", "-crf", "18" if browser else "0"]
+        )
     run([*args, "-movflags", "+faststart", "-y", str(output)])
 
 

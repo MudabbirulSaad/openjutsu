@@ -3,6 +3,38 @@ from openjutsu.media import Media, normalize, probe, run
 from openjutsu.store import Store
 
 
+def test_finalization_removes_provider_padding_and_preserves_delivery_shape(tmp_path):
+    from openjutsu.media import mux
+
+    source, master, delivery = [
+        tmp_path / name for name in ["provider.mp4", "master.mp4", "delivery.mp4"]
+    ]
+    run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=240x428:rate=24",
+            "-frames:v",
+            "25",
+            "-c:v",
+            "libx264",
+            "-y",
+            str(source),
+        ]
+    )
+    mux(source, None, master, frame_count=24)
+    mux(master, None, delivery, browser=True, frame_count=24, target_size=(270, 480))
+    m, d = probe(master), probe(delivery)
+    assert m["frames"] == d["frames"] == 24
+    assert m["duration"] == d["duration"] == 1
+    assert (m["width"], m["height"]) == (240, 428)
+    assert (d["width"], d["height"]) == (270, 480)
+
+
 def test_normalization_and_exact_frames(tmp_path):
     source = tmp_path / "synthetic.mp4"
     run(
