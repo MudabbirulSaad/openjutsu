@@ -1,8 +1,9 @@
 # Step 4.5 — Simplified workflow and progress architecture
 
-**Status: design proposal; no production implementation.** Reviewed on 2026-10-12 against
+**Status: approved architecture direction; no production implementation.** Reviewed on 2026-10-12 against
 `f55050cb3d5ad76ca0b0f86714b0d17b34c51111` on `codex/step-4.5-workflow-design`.
-Implementation requires subsequent approval. Step 5 has not begun.
+The owner approved the architecture direction after review. Implementation follows separately
+authorised stages. Step 5 is authorised after the design PR is merged; it has not begun.
 
 The recommendation is to evolve the existing React Studio into two views over the same
 revisioned job: Simple for the normal transformation, Advanced for precise corrections.
@@ -888,8 +889,8 @@ production defaults. Choose numerical estimator cutoffs only after calibration.
 
 ## 15. Recommendation after Step 5
 
-Approve this design direction, then complete and review Step 5 before extending cached analysis
-or automatic preparation. Implement operation progress and upscale telemetry early: they are
+The owner has approved this design direction. Complete and review Step 5 before extending cached
+analysis or automatic preparation. Implement operation progress and upscale telemetry early: they are
 useful in existing Advanced Mode and directly address the 22-minute silent upscale. Next add
 reference checks/stable mentions and the Step 6 binding audit; then bounded plan interpretation,
 automatic preparation and task-oriented Simple composition. Keep quality validation and paid
