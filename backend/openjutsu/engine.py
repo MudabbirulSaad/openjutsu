@@ -146,39 +146,37 @@ class Engine:
                 env=env,
                 start_new_session=os.name != "nt",
             )
+            events = []
+
+            def drain():
+                for line in self.process.stdout:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    events.append(event)
+                    if "completed" in event:
+                        self.store.update(
+                            "job",
+                            job["id"],
+                            {
+                                "progress": {
+                                    "stage": name,
+                                    "completed": event["completed"],
+                                    "total": event["total"],
+                                }
+                            },
+                        )
+
+            reader = threading.Thread(target=drain, daemon=True)
+            reader.start()
             while self.process.poll() is None:
                 if self.stop_event.is_set() or self.store.get("job", job["id"])["cancel"]:
                     self.kill_process()
                     raise InterruptedError("Local processing stopped")
                 # Avoid blocking cancellation on a silent model subprocess.
                 time.sleep(0.1)
-                # stdout is drained separately to prevent model logging pipe exhaustion.
-                if not hasattr(self, "_reader") or not self._reader.is_alive():
-                    events = []
-
-                    def drain():
-                        for line in self.process.stdout:
-                            try:
-                                event = json.loads(line)
-                            except ValueError:
-                                continue
-                            events.append(event)
-                            if "completed" in event:
-                                self.store.update(
-                                    "job",
-                                    job["id"],
-                                    {
-                                        "progress": {
-                                            "stage": name,
-                                            "completed": event["completed"],
-                                            "total": event["total"],
-                                        }
-                                    },
-                                )
-
-                    self._reader = threading.Thread(target=drain, daemon=True)
-                    self._reader.start()
-            self._reader.join(timeout=5)
+            reader.join(timeout=5)
             for event in events:
                 if "result" in event:
                     result = event

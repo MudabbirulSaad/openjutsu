@@ -1,0 +1,70 @@
+import json
+import os
+from pathlib import Path
+
+import httpx
+import typer
+
+app = typer.Typer(help="Local studio and the same job interface used by the browser.")
+
+
+@app.command()
+def serve(host: str = "127.0.0.1", port: int = 8765):
+    if host not in {"localhost", "127.0.0.1", "::1"}:
+        raise typer.BadParameter("Use a localhost address")
+    import uvicorn
+
+    from .api import create_app
+
+    uvicorn.run(create_app(), host=host, port=port)
+
+
+@app.command()
+def status(job: str = "", url: str = "http://127.0.0.1:8765"):
+    response = httpx.get(url + ("/api/jobs/" + job if job else "/api/jobs"))
+    response.raise_for_status()
+    typer.echo(json.dumps(response.json(), indent=2))
+
+
+@app.command()
+def import_video(path: Path, name: str = "", url: str = "http://127.0.0.1:8765"):
+    with path.open("rb") as f:
+        response = httpx.post(url + "/api/assets", files={"file": (path.name, f)}, timeout=300)
+    response.raise_for_status()
+    source = response.json()
+    response = httpx.post(
+        url + "/api/jobs",
+        json={
+            "source": source["id"],
+            "name": name or path.stem,
+            "recipe": {"end": min(5, source["metadata"]["duration"])},
+        },
+    )
+    response.raise_for_status()
+    typer.echo(json.dumps(response.json(), indent=2))
+
+
+@app.command()
+def action(job: str, operation: str, body: Path, url: str = "http://127.0.0.1:8765"):
+    """Submit an explicit JSON request; never auto-approve or auto-finalize."""
+    if operation not in {"prepare", "approve", "previews", "finalize", "cancel", "save-recipe"}:
+        raise typer.BadParameter("Unknown job action")
+    response = httpx.post(
+        f"{url}/api/jobs/{job}/{operation}", json=json.loads(body.read_text()), timeout=60
+    )
+    response.raise_for_status()
+    typer.echo(json.dumps(response.json(), indent=2))
+
+
+@app.command()
+def doctor():
+    from .config import Config
+    from .models import readiness
+
+    config = Config.environment()
+    config.initialize()
+    typer.echo(json.dumps(readiness(config), indent=2))
+    typer.echo("Runtime: " + str(config.root))
+    typer.echo(
+        "FFmpeg: " + (os.getenv("PATH", "") and __import__("shutil").which("ffmpeg") or "missing")
+    )
