@@ -2,7 +2,7 @@
 
 A personal, local video preparation and generation studio. Prepare on your GPU, review the exact conditioning media, compare cloud previews, and choose native continuation, local upscaling or original resolution.
 
-**Alpha release:** the studio and durable backend are implemented and locally tested. Cloud adapters have synthetic contract coverage; live billing, media eligibility and generation quality require your own configured, budgeted pilot. No provider is shipped qualified. This project makes no claim about Higgsfield's proprietary internals.
+**Alpha release:** the studio and durable backend are implemented and locally tested. Cloud adapters have synthetic contract coverage, and one consent-confirmed ArgoLink 480p multi-reference pilot has verified submission, download and settled billing. That result still showed likeness and motion drift; your own configured pilot must meet the quality bar. No provider is shipped qualified. This project makes no claim about Higgsfield's proprietary internals. See [validation](docs/validation.md).
 
 ![OpenJutsu light studio with synthetic subjects](docs/screenshots/studio-light.png)
 
