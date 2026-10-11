@@ -23,6 +23,9 @@ def probe(path):
     rate = (v or {}).get("avg_frame_rate", "0/1").split("/")
     fps = int(rate[0]) / int(rate[1]) if int(rate[1]) else 0
     duration = float(data.get("format", {}).get("duration", 0))
+    rotation = next(
+        (s.get("rotation", 0) for s in (v or {}).get("side_data_list", []) if "rotation" in s), 0
+    )
     return {
         "width": (v or {}).get("width"),
         "height": (v or {}).get("height"),
@@ -32,6 +35,8 @@ def probe(path):
         "has_audio": a is not None,
         "codec": (v or a or {}).get("codec_name"),
         "sample_rate": int((a or {}).get("sample_rate", 0)),
+        "rotation": rotation,
+        "start_time": float(data.get("format", {}).get("start_time", 0)),
     }
 
 
@@ -88,6 +93,14 @@ class Media:
             "kind": kind,
             "metadata": metadata,
         }
+        if kind == "image":
+            from PIL import Image, ImageOps
+
+            sanitized = folder / "reference.png"
+            if not sanitized.exists():
+                with Image.open(path) as im:
+                    ImageOps.exif_transpose(im).convert("RGB").save(sanitized)
+            asset["reference"] = str(sanitized)
         if kind == "video":
             poster = folder / "poster.jpg"
             if not poster.exists():
@@ -125,6 +138,13 @@ class Media:
             "producer": producer,
             "cache_key": cache_key,
         }
+        manifest = path.parent / "manifest.json"
+        if manifest.is_file():
+            provenance = json.loads(manifest.read_text())
+            item["cache_key"] = path.parent.name
+            item["stage"] = provenance.get("stage")
+            item["model"] = provenance.get("model")
+            item["model_version"] = provenance.get("model_version")
         return self.store.put("artifact", item)
 
     def frame(self, artifact, index):
@@ -221,7 +241,7 @@ def mux(video, soundtrack, output, browser=False):
         args.extend(["-map", "0:v:0", "-an"])
     args.extend(["-c:v", "libx264" if browser else "copy"])
     if browser:
-        args.extend(["-pix_fmt", "yuv420p", "-crf", "18"])
+        args.extend(["-vf", "fps=24", "-pix_fmt", "yuv420p", "-crf", "18"])
     run([*args, "-movflags", "+faststart", "-y", str(output)])
 
 
@@ -248,3 +268,56 @@ def waveform(path, output):
     samples = np.frombuffer(raw, dtype=np.float32)
     values = [float(np.max(np.abs(x))) if len(x) else 0 for x in np.array_split(samples, 240)]
     Path(output).write_text(json.dumps(values))
+
+
+def timeline(source, normalized, start, end, output):
+    from bisect import bisect_left
+
+    data = json.loads(
+        run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-read_intervals",
+                f"{start}%{end}",
+                "-select_streams",
+                "v:0",
+                "-show_frames",
+                "-show_entries",
+                "frame=best_effort_timestamp_time",
+                "-of",
+                "json",
+                str(source),
+            ]
+        )
+    )
+    offset = probe(source)["start_time"]
+    points = sorted(
+        float(f["best_effort_timestamp_time"]) - offset
+        for f in data["frames"]
+        if "best_effort_timestamp_time" in f
+    )
+    result = []
+    for index in range(probe(normalized)["frames"]):
+        requested = start + index / 24
+        position = bisect_left(points, requested)
+        candidates = points[max(0, position - 1) : position + 1]
+        nearest = min(candidates, key=lambda p: abs(p - requested)) if candidates else None
+        result.append(
+            {
+                "frame": index,
+                "output_time": index / 24,
+                "source_time_requested": requested,
+                "source_pts_nearest": nearest,
+            }
+        )
+    Path(output).write_text(
+        json.dumps(
+            {
+                "fps": 24,
+                "mapping": "nearest source PTS to requested CFR sampling time; normalized pixels are the review authority",
+                "frames": result,
+            }
+        )
+    )

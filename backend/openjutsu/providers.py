@@ -62,6 +62,17 @@ def account(settings):
     )
 
 
+def qualification_profile(provider, recipe, native=False):
+    return fingerprint(
+        {
+            "model": CAPABILITIES[provider]["model"],
+            "mode": recipe["mode"],
+            "subjects": [s["kind"] for s in sorted(recipe["subjects"], key=lambda s: s["id"])],
+            "phase": "native" if native else "preview",
+        }
+    )
+
+
 class Provider:
     def __init__(self, name, settings, transport=None):
         self.name, self.settings = name, settings
@@ -188,6 +199,7 @@ class Provider:
         if status in {"failed", "expired", "cancelled"}:
             return {
                 "status": "failed",
+                "cost": data.get("cost"),
                 "error": "Provider reported failure or expiry; inspect its dashboard",
             }
         if status not in {"succeeded", "completed", "done"}:
@@ -271,9 +283,18 @@ class Uploads:
         ), s
 
     def put(self, path, attempt):
+        import mimetypes
+
         client, settings = self.client()
         key = f"openjutsu/{attempt}/{identifier()}{Path(path).suffix}"
-        client.upload_file(str(path), settings["bucket"], key)
+        client.upload_file(
+            str(path),
+            settings["bucket"],
+            key,
+            ExtraArgs={
+                "ContentType": mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+            },
+        )
         self.store.put(
             "upload",
             {
@@ -343,7 +364,10 @@ def make_quotes(store, secrets, job, native_parent=None):
             (
                 q
                 for q in store.list("qualification")
-                if q["provider"] == name and q["account"] == account(config)
+                if q["provider"] == name
+                and q["account"] == account(config)
+                and q.get("profile")
+                == qualification_profile(name, job["recipe"], bool(native_parent))
             ),
             None,
         )

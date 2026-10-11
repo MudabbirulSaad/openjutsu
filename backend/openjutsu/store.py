@@ -105,7 +105,9 @@ class Store:
             data["updated"] = time.time()
             self._put(db, kind, data)
             if kind in {"job", "attempt"}:
-                self._event(db, id if kind == "job" else data["job"], "updated", record=kind, id=id)
+                self._event(
+                    db, id if kind == "job" else data["job"], "updated", record=kind, record_id=id
+                )
             return data
 
     def create_job(self, request):
@@ -245,6 +247,7 @@ class Store:
                 "draft_expires": None,
                 "parent": parent,
                 "pilot": pilot,
+                "recipe_snapshot": job["recipe"],
                 "artifact": None,
                 "created": time.time(),
             }
@@ -319,6 +322,6 @@ class Store:
             )
             args = (after, job) if job else (after,)
             return [
-                {"id": r["id"], "job": r["job"], **json.loads(r["data"])}
+                {**json.loads(r["data"]), "id": r["id"], "job": r["job"]}
                 for r in db.execute(sql, args)
             ]

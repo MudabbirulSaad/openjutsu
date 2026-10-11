@@ -9,7 +9,7 @@ app = typer.Typer(help="Local studio and the same job interface used by the brow
 
 
 @app.command()
-def serve(host: str = "127.0.0.1", port: int = 8765):
+def serve(host: str = "127.0.0.1", port: int = 9780):
     if host not in {"localhost", "127.0.0.1", "::1"}:
         raise typer.BadParameter("Use a localhost address")
     import uvicorn
@@ -20,14 +20,14 @@ def serve(host: str = "127.0.0.1", port: int = 8765):
 
 
 @app.command()
-def status(job: str = "", url: str = "http://127.0.0.1:8765"):
+def status(job: str = "", url: str = "http://127.0.0.1:9780"):
     response = httpx.get(url + ("/api/jobs/" + job if job else "/api/jobs"))
     response.raise_for_status()
     typer.echo(json.dumps(response.json(), indent=2))
 
 
 @app.command()
-def import_video(path: Path, name: str = "", url: str = "http://127.0.0.1:8765"):
+def import_video(path: Path, name: str = "", url: str = "http://127.0.0.1:9780"):
     with path.open("rb") as f:
         response = httpx.post(url + "/api/assets", files={"file": (path.name, f)}, timeout=300)
     response.raise_for_status()
@@ -45,7 +45,7 @@ def import_video(path: Path, name: str = "", url: str = "http://127.0.0.1:8765")
 
 
 @app.command()
-def action(job: str, operation: str, body: Path, url: str = "http://127.0.0.1:8765"):
+def action(job: str, operation: str, body: Path, url: str = "http://127.0.0.1:9780"):
     """Submit an explicit JSON request; never auto-approve or auto-finalize."""
     if operation not in {"prepare", "approve", "previews", "finalize", "cancel", "save-recipe"}:
         raise typer.BadParameter("Unknown job action")

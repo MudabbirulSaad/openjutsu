@@ -29,4 +29,10 @@ Runtime data defaults to ~/.local/share/openjutsu on Linux. The Windows source i
 
 ## Acceptance
 
+The Linux worker holds a shared model-directory file lock, preventing two application runtimes from running expensive stages together. Cache manifests verify output hashes before reuse. Each producing stage records its parameters and model/checkpoint version in artifact provenance. Worker termination clears active status even on cancellation or failure.
+
+Event IDs are integer ledger cursors, independent of record IDs. The browser uses them to reconnect and retains unsaved drafts with their base revision. Reference images are orientation-corrected and stripped of metadata; the same sanitized pixels are previewed and uploaded. Browser copies are normalized to 24 fps while native masters retain their original encoding.
+
+Qualification is specific to provider/account, model, preparation mode, subject count/category, and preview versus native continuation. Failed remote tasks retain their reservation until billing is reported or a receipt is reconciled. A preview qualification does not assert verified native-HD billing.
+
 Review frame alignment, timing, masks, body replacement, original audio, and native/upscaled provenance. Qualification requires a successful pilot, reviewed media policy, actual settled billing, and human scores ≥4/5 for identity, motion, and temporal stability. No subject swaps or visible synchronization errors are accepted. Hardware and provider qualifications are reported separately from implemented interfaces.

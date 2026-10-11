@@ -33,7 +33,7 @@ class Engine:
     def stop(self):
         self.stop_event.set()
         if self.process and self.process.poll() is None:
-            self.process.terminate()
+            self.kill_process()
         for thread in self.threads:
             thread.join(timeout=5)
 
@@ -90,6 +90,27 @@ class Engine:
         return self.store.enqueue(id, "prepare", {"revision": revision})
 
     def run_stage(self, job, name, source, parameters, **kwargs):
+        if self.stop_event.is_set() or self.store.get("job", job["id"])["cancel"]:
+            raise InterruptedError("Local processing stopped")
+        try:
+            if os.name == "nt":
+                return self._run_stage(job, name, source, parameters, **kwargs)
+            import fcntl
+
+            with (self.config.model_dir / ".gpu.lock").open("a") as lock:
+                while True:
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if self.stop_event.is_set() or self.store.get("job", job["id"])["cancel"]:
+                            raise InterruptedError("Cancelled while waiting for the GPU")
+                        self.stop_event.wait(0.1)
+                return self._run_stage(job, name, source, parameters, **kwargs)
+        finally:
+            self.process = None
+
+    def _run_stage(self, job, name, source, parameters, **kwargs):
         source = Path(source)
         dependencies = {"source": digest(source)}
         for key, value in kwargs.items():
@@ -103,9 +124,15 @@ class Engine:
             if checkpoint and checkpoint.is_file()
             else None
         )
+        model_info = self.model_state["models"].get(model, {})
+        model_stamp = {
+            "file": model_stamp,
+            "sha256": model_info.get("checkpoint_sha256"),
+            "package": model_info.get("package_version"),
+        }
         key = fingerprint(
             {
-                "version": 1,
+                "version": 2 if name == "depth" else 1,
                 "stage": name,
                 "inputs": dependencies,
                 "parameters": parameters,
@@ -118,7 +145,10 @@ class Engine:
         manifest = output / "manifest.json"
         if manifest.exists():
             result = json.loads(manifest.read_text())
-            if all(Path(path).is_file() for path in result["paths"].values()):
+            if result.get("hashes") and all(
+                Path(path).is_file() and digest(path) == result["hashes"].get(kind)
+                for kind, path in result["paths"].items()
+            ):
                 self.store.update("job", job["id"], {"progress": {"stage": name, "cached": True}})
                 return result["paths"]
         task = {
@@ -135,6 +165,7 @@ class Engine:
         env = dict(os.environ)
         env["HF_HUB_OFFLINE"] = "1"
         env["TRANSFORMERS_OFFLINE"] = "1"
+        env["TORCH_HOME"] = str(self.config.model_dir / "torch")
         error_path = output / "worker-error.log"
         result = None
         with error_path.open("w") as errors:
@@ -147,9 +178,10 @@ class Engine:
                 start_new_session=os.name != "nt",
             )
             events = []
+            process = self.process
 
             def drain():
-                for line in self.process.stdout:
+                for line in process.stdout:
                     try:
                         event = json.loads(line)
                     except ValueError:
@@ -187,7 +219,18 @@ class Engine:
         if not all(Path(p).is_file() for p in paths.values()):
             raise RuntimeError("Worker result contains missing artifacts")
         manifest.write_text(
-            json.dumps({"paths": paths, "seconds": result["seconds"], "peak_mb": result["peak_mb"]})
+            json.dumps(
+                {
+                    "paths": paths,
+                    "hashes": {kind: digest(path) for kind, path in paths.items()},
+                    "seconds": result["seconds"],
+                    "peak_mb": result["peak_mb"],
+                    "stage": name,
+                    "parameters": parameters,
+                    "model": model,
+                    "model_version": model_stamp,
+                }
+            )
         )
         self.store.put(
             "benchmark",
@@ -313,7 +356,14 @@ class Engine:
         paths.update(self.run_stage(job, "export", source, {}, audio=soundtrack))
         outputs = {
             k: self.media.artifact(
-                job, k, p, "upscaled 1080p" if data["route"] == "upscale" else "original generation"
+                job,
+                k,
+                p,
+                {
+                    "upscale": "upscaled 1080p",
+                    "native": "native 1080p continuation",
+                    "original": "original generation",
+                }[data["route"]],
             )["id"]
             for k, p in paths.items()
         }
@@ -387,8 +437,9 @@ class Engine:
                         refs.append(s["portrait_asset"])
                     else:
                         for id in s["references"]:
+                            asset = self.store.get("asset", id)
                             refs.append(
-                                self.uploads.put(self.store.get("asset", id)["path"], a["id"])
+                                self.uploads.put(asset.get("reference", asset["path"]), a["id"])
                             )
                 payload = provider.payload(job["recipe"], video, refs)
             submitted = True
@@ -429,7 +480,7 @@ class Engine:
             result = provider.poll(a["remote_id"])
             if result["status"] == "failed":
                 self.store.update("attempt", a["id"], result)
-                self.store.settle(a["id"], failed=True)
+                self.store.settle(a["id"], result.get("cost"))
                 self.store.update("job", a["job"], {"status": "failed", "error": result["error"]})
             elif result["status"] == "succeeded":
                 folder = self.config.root / "jobs" / a["job"] / a["id"]
@@ -479,6 +530,10 @@ class Engine:
                         "error": None,
                     },
                 )
+                if a["parent"]:
+                    self.store.enqueue(
+                        a["job"], "export", {"attempt_id": a["id"], "route": "native"}
+                    )
             else:
                 self.store.update("attempt", a["id"], {"progress": result.get("progress")})
         finally:

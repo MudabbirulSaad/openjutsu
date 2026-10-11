@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,12 +9,13 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Config
 from .engine import Engine
 from .media import normalize, probe
 from .models import readiness
-from .providers import CAPABILITIES, account, make_quotes
+from .providers import CAPABILITIES, account, make_quotes, qualification_profile
 from .store import Conflict, Store, fingerprint, identifier, money
 from .types import (
     CreateJob,
@@ -27,7 +29,7 @@ from .types import (
 
 
 class Budget(BaseModel):
-    budget_usd: float = Field(ge=0, le=10000)
+    budget_usd: float = Field(ge=0, le=10000, allow_inf_nan=False)
 
 
 class Settings(BaseModel):
@@ -36,7 +38,9 @@ class Settings(BaseModel):
 
 def public_record(record):
     return {
-        k: v for k, v in record.items() if k not in {"path", "poster", "account", "operation_id"}
+        k: v
+        for k, v in record.items()
+        if k not in {"path", "poster", "reference", "account", "operation_id"}
     }
 
 
@@ -55,6 +59,11 @@ def create_app(config=None, start_workers=True):
             engine.stop()
 
     app = FastAPI(title="OpenJutsu", version="0.1.0a1", lifespan=lifespan)
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["localhost", "127.0.0.1", "[::1]"]
+        + ([] if start_workers else ["testserver"]),
+    )
     app.state.store, app.state.engine = store, engine
 
     @app.middleware("http")
@@ -86,6 +95,10 @@ def create_app(config=None, start_workers=True):
     @app.exception_handler(ValueError)
     async def invalid(_, exception):
         return JSONResponse({"detail": str(exception)}, status_code=422)
+
+    @app.exception_handler(RuntimeError)
+    async def runtime_error(_, exception):
+        return JSONResponse({"detail": engine.secrets.redact(str(exception))}, status_code=422)
 
     def view(id):
         job = store.get("job", id)
@@ -190,7 +203,7 @@ def create_app(config=None, start_workers=True):
     @app.get("/api/assets/{id}/content")
     def asset_content(id: str, poster: bool = False):
         a = store.get("asset", id)
-        return FileResponse(a.get("poster", a["path"]) if poster else a["path"])
+        return FileResponse(a.get("poster", a["path"]) if poster else a.get("reference", a["path"]))
 
     @app.post("/api/jobs")
     def create(body: CreateJob):
@@ -220,6 +233,8 @@ def create_app(config=None, start_workers=True):
         store.budget(id, money(body.budget_usd))
         return view(id)
 
+    preview_lock = threading.Lock()
+
     def preview_path(id):
         j = store.get("job", id)
         source = store.get("asset", j["source"])
@@ -228,8 +243,9 @@ def create_app(config=None, start_workers=True):
             {"source": source["hash"], "start": r["start"], "end": r["end"], "preview": 1}
         )
         path = config.root / "cache" / (key + ".mp4")
-        if not path.exists():
-            normalize(source["path"], path, r["start"], r["end"])
+        with preview_lock:
+            if not path.exists():
+                normalize(source["path"], path, r["start"], r["end"])
         return path
 
     @app.get("/api/jobs/{id}/source-preview")
@@ -294,7 +310,9 @@ def create_app(config=None, start_workers=True):
                 or q["account"] != a["account"]
             ):
                 raise Conflict("Continuation must use the originating draft and account")
-            result = store.reserve_attempt(id, body.revision, q, body.operation_id, parent=a["id"])
+            result = store.reserve_attempt(
+                id, body.revision, q, body.operation_id, pilot=body.pilot, parent=a["id"]
+            )
             return public_record(result)
         if body.route == "upscale" and not engine.model_state["models"].get(body.upscaler, {}).get(
             "ready"
@@ -331,8 +349,8 @@ def create_app(config=None, start_workers=True):
             store.update("attempt", id, {"remote_id": body.remote_id, "status": "pending"})
             store.update("job", a["job"], {"status": "generating", "error": None})
         if body.actual_cost_usd is not None:
-            if a["status"] != "succeeded":
-                raise Conflict("Settle billing only after a successful result")
+            if a["status"] not in {"succeeded", "failed"} or not a.get("remote_id"):
+                raise Conflict("Settle billing only after a known completed provider request")
             store.settle(id, body.actual_cost_usd)
         return public_record(store.get("attempt", id))
 
@@ -355,6 +373,7 @@ def create_app(config=None, start_workers=True):
                 "id": identifier(),
                 "provider": name,
                 "account": a["account"],
+                "profile": qualification_profile(name, a["recipe_snapshot"], bool(a["parent"])),
                 "pilot": a["id"],
                 "review": body.model_dump(),
                 "time": time.time(),
@@ -412,6 +431,10 @@ def create_app(config=None, start_workers=True):
                         "hash": a["hash"],
                         "metadata": a["metadata"],
                         "producer": a["producer"],
+                        "stage": a.get("stage"),
+                        "model": a.get("model"),
+                        "model_version": a.get("model_version"),
+                        "cache_key": a.get("cache_key"),
                     }
                     for a in store.list("artifact")
                     if a["job"] == id

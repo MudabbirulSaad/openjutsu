@@ -41,3 +41,48 @@ def test_normalization_and_exact_frames(tmp_path):
     assert probe(source)["fps"] == 30
     item = m.artifact({"id": "job", "revision": 1}, "normalized", output, "ffmpeg")
     assert m.frame(item, 95).is_file()
+
+
+def test_rotation_and_variable_timestamps_normalize_to_exact_frames(tmp_path):
+    source = tmp_path / "vfr.mp4"
+    rotated = tmp_path / "rotated.mp4"
+    output = tmp_path / "normalized.mp4"
+    run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=30:duration=6",
+            "-vf",
+            "select='not(mod(n,3))',setpts=N/(10*TB)",
+            "-fps_mode",
+            "vfr",
+            "-c:v",
+            "libx264",
+            "-y",
+            str(source),
+        ]
+    )
+    run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-display_rotation",
+            "90",
+            "-i",
+            str(source),
+            "-c",
+            "copy",
+            "-y",
+            str(rotated),
+        ]
+    )
+    normalize(rotated, output, 1, 5)
+    metadata = probe(output)
+    assert (metadata["width"], metadata["height"]) == (180, 320)
+    assert metadata["frames"] == 96
+    assert metadata["fps"] == 24

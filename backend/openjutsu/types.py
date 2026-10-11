@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class Point(Strict):
@@ -95,6 +95,7 @@ class FinalizeRequest(Revision):
     upscaler: Literal["seedvr2", "realesrgan"] = "seedvr2"
     operation_id: str = Field(min_length=8, max_length=100)
     quote_id: str | None = None
+    pilot: bool = False
 
 
 class Qualification(Strict):

@@ -1,3 +1,4 @@
+import importlib.metadata
 import importlib.util
 import json
 import subprocess
@@ -15,7 +16,11 @@ MODEL_SPECS = {
     "sam2-small": {"package": "sam2", "file": "sam2.1_hiera_small.pt", "license": "Apache-2.0"},
     "sam3": {"package": "sam3", "file": "sam3.pt", "license": "SAM License; gated checkpoint"},
     "mesh": {"package": "mediapipe", "file": "face_landmarker.task", "license": "Apache-2.0"},
-    "vocals": {"package": "demucs", "file": None, "license": "MIT"},
+    "vocals": {
+        "package": "demucs",
+        "file": "torch/hub/checkpoints/955717e8-8726e21a.th",
+        "license": "MIT",
+    },
     "pitch": {"package": "librosa", "file": None, "license": "ISC"},
     "whisper": {"package": "whisper", "file": "whisper/large-v3-turbo.pt", "license": "MIT"},
     "describe": {
@@ -23,10 +28,14 @@ MODEL_SPECS = {
         "file": "qwen3-vl/config.json",
         "license": "Apache-2.0",
     },
-    "seedvr2": {"package": "torch", "file": "seedvr2/inference_cli.py", "license": "Apache-2.0"},
+    "seedvr2": {
+        "package": "torch",
+        "file": "seedvr2-weights/seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+        "license": "Apache-2.0",
+    },
     "realesrgan": {
         "package": "torch",
-        "file": "realesrgan/inference_realesrgan.py",
+        "file": "realesrgan/weights/RealESRGAN_x4plus.pth",
         "license": "BSD-3-Clause",
     },
 }
@@ -34,15 +43,45 @@ MODEL_SPECS = {
 
 def local_readiness(model_dir):
     ready = {}
+    hashes_path = Path(model_dir) / "checkpoint-hashes.json"
+    hashes = json.loads(hashes_path.read_text()) if hashes_path.exists() else {}
     for name, spec in MODEL_SPECS.items():
         package = importlib.util.find_spec(spec["package"]) is not None
         checkpoint = spec["file"] is None or (Path(model_dir) / spec["file"]).is_file()
+        if name == "depth":
+            package = (
+                package
+                and importlib.util.find_spec("cv2") is not None
+                and (
+                    Path(model_dir) / "video-depth-anything/video_depth_anything/video_depth.py"
+                ).is_file()
+            )
+        if name == "describe":
+            checkpoint = checkpoint and bool(
+                list((Path(model_dir) / "qwen3-vl").glob("*.safetensors"))
+            )
+        if name == "seedvr2":
+            checkpoint = (
+                checkpoint
+                and (Path(model_dir) / "seedvr2-weights/ema_vae_fp16.safetensors").is_file()
+                and (Path(model_dir) / "seedvr2/inference_cli.py").is_file()
+            )
+            package = package and importlib.util.find_spec("diffusers") is not None
+        if name == "realesrgan":
+            package = package and importlib.util.find_spec("realesrgan") is not None
         ready[name] = {
             "ready": package and checkpoint,
             "package": package,
             "checkpoint": checkpoint,
             "license": spec["license"],
+            "checkpoint_sha256": hashes.get(spec["file"]),
         }
+        try:
+            ready[name]["package_version"] = importlib.metadata.version(
+                {"whisper": "openai-whisper", "sam2": "sam-2"}.get(spec["package"], spec["package"])
+            )
+        except importlib.metadata.PackageNotFoundError:
+            ready[name]["package_version"] = None
     try:
         import torch
 
