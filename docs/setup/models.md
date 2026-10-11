@@ -5,7 +5,7 @@ Use Ubuntu WSL2 with Python 3.12 and a CUDA-capable NVIDIA driver. Do not instal
 ```bash
 bash scripts/setup.sh
 runtime="$HOME/.local/share/openjutsu"
-"$runtime/venv/bin/python" scripts/install_models.py depth sam2-large mesh audio whisper
+"$runtime/venv/bin/python" scripts/install_models.py depth sam2-large mesh quality audio whisper
 # Optional lower-memory segmentation profile:
 "$runtime/venv/bin/python" scripts/install_models.py sam2-small
 # Optional assistance and finalization:
@@ -22,6 +22,7 @@ The installer downloads weights into the Linux runtime, checks out pinned upstre
 | Depth | [Video Depth Anything Small](https://github.com/DepthAnything/Video-Depth-Anything) | Apache 2.0 Small; Base/Large are noncommercial and excluded |
 | Masks | [SAM 2.1](https://github.com/facebookresearch/sam2) | Apache 2.0; Large default, Small optional; state/video offloaded to CPU |
 | Mesh | [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker/python) | Apache 2.0; one talking subject; stops on tracking gaps |
+| Quality | [MediaPipe Pose Landmarker Heavy](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/python) and Face Landmarker | Apache 2.0; independent frame detections; anatomy/edge decisions require source inspection |
 | Suggestions | [Qwen3-VL-4B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct) | Apache 2.0; ordered-frame descriptions are editable suggestions |
 | Upscale | [SeedVR2 standalone](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | Apache 2.0 integration; 3B FP8 plus shared VAE, CPU offload and VAE tiling |
 | Fallback | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) | BSD 3-Clause; frame-based, no automatic face enhancement |

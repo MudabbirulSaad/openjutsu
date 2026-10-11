@@ -54,6 +54,15 @@ def test_reusable_template_does_not_reuse_another_portraits_consent_or_intervals
                         "consent_confirmed": True,
                         "references": ["reference"],
                         "intervals": [{"start": 0, "end": 96}],
+                        "visibility": [
+                            {
+                                "start": 0,
+                                "end": 20,
+                                "state": "fully_occluded",
+                                "reason": "Synthetic occluder",
+                            }
+                        ],
+                        "seed_frame": 30,
                     }
                 ],
             },
@@ -64,6 +73,7 @@ def test_reusable_template_does_not_reuse_another_portraits_consent_or_intervals
     subject = saved["recipe"]["subjects"][0]
     assert subject["consent_confirmed"] is False
     assert subject["references"] == [] and subject["intervals"] == []
+    assert subject["visibility"] == [] and subject["seed_frame"] is None
 
 
 def test_revision_conflict_and_budget(client):

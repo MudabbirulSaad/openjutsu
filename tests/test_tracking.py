@@ -57,3 +57,64 @@ def test_long_mask_storage_survives_exact_roundtrip(tmp_path):
         masks[:, 200:800, 100:400] = 1
         path = save_masks(tmp_path, masks)
         assert np.array_equal(load_masks(path), masks)
+
+
+def test_sam_prompts_merge_same_frame_points_and_box_with_correct_scale():
+    import numpy as np
+    from openjutsu.tracking import sam2_track_interval
+
+    events = []
+
+    class Predictor:
+        def init_state(self, path, **kwargs):
+            return {"tracked": set()}
+
+        def add_new_points_or_box(self, state, index, id, **kwargs):
+            events.append((index, id, index in state["tracked"], kwargs))
+
+        def propagate_in_video(self, state, start_frame_idx, reverse):
+            order = range(start_frame_idx, -1, -1) if reverse else range(start_frame_idx, 10)
+            for index in order:
+                state["tracked"].add(index)
+                yield index, [2], [None]
+
+    cast = {
+        "id": 2,
+        "annotations": [
+            {
+                "frame": 16,
+                "points": [{"x": 0.9, "y": 0.1, "include": False}],
+                "box": [0.1, 0.2, 0.8, 0.9],
+            },
+            {"frame": 12, "points": [{"x": 0.25, "y": 0.5, "include": True}], "box": None},
+            {"frame": 16, "points": [{"x": 0.5, "y": 0.4, "include": True}], "box": None},
+            {"frame": 20, "points": [{"x": 0.5, "y": 0.4, "include": True}], "box": None},
+        ],
+    }
+    outputs = list(
+        sam2_track_interval(Predictor(), "synthetic", cast, {"start": 10, "end": 20}, 200, 80)
+    )
+    assert [(index, id, tracked) for index, id, tracked, _ in events] == [
+        (2, 2, False),
+        (6, 2, True),
+    ]
+    assert np.array_equal(events[0][3]["points"], [[50, 40]])
+    assert np.allclose(events[1][3]["points"], [[180, 8], [100, 32]])
+    assert np.array_equal(events[1][3]["labels"], [0, 1])
+    assert np.allclose(events[1][3]["box"], [20, 16, 160, 72])
+    assert {index for index, ids, _ in outputs} == set(range(10))
+    assert all(ids == [2] for _, ids, _ in outputs)
+
+
+def test_conflicting_same_frame_boxes_are_explicit_error():
+    from openjutsu.tracking import sam2_track_interval
+
+    cast = {
+        "id": 1,
+        "annotations": [
+            {"frame": 0, "points": [], "box": [0, 0, 0.5, 0.5]},
+            {"frame": 0, "points": [], "box": [0.1, 0.1, 0.8, 0.8]},
+        ],
+    }
+    with pytest.raises(ValueError, match="Conflicting boxes"):
+        list(sam2_track_interval(None, "synthetic", cast, {"start": 0, "end": 4}, 20, 10))

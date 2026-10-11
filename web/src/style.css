@@ -1159,3 +1159,45 @@ details summary {
     transition: none !important;
   }
 }
+.quality-summary {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+.quality-finding {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+.quality-finding summary {
+  cursor: pointer;
+  line-height: 1.6;
+}
+.quality-comparisons {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+}
+.quality-comparisons a {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  text-align: center;
+}
+.quality-comparisons img {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+}
+.quality-measurements {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  max-height: 170px;
+  overflow: auto;
+}
+.quality-finding label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}

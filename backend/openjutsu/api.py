@@ -38,6 +38,15 @@ class Settings(BaseModel):
     values: dict[str, str]
 
 
+class QualityReview(Revision):
+    report_id: str
+    finding_id: str
+    resolution: Literal[
+        "inspected", "preserve_background", "false_detection", "requires_replacement"
+    ]
+    reason: str = Field(min_length=8, max_length=2000)
+
+
 def public_record(record):
     return {
         k: v
@@ -104,6 +113,18 @@ def create_app(config=None, start_workers=True):
 
     def view(id):
         job = store.get("job", id)
+        try:
+            report = store.quality_report(id)
+            quality = {
+                key: report[key] for key in ("status", "counts", "approval_ready", "report_id")
+            }
+        except Conflict as exc:
+            quality = {
+                "status": "BLOCKED",
+                "counts": {"BLOCKED": 1, "WARNING": 0},
+                "approval_ready": False,
+                "message": str(exc),
+            }
         artifacts = {
             k: public_record(store.get("artifact", a)) for k, a in job["artifacts"].items()
         }
@@ -126,6 +147,7 @@ def create_app(config=None, start_workers=True):
         )
         return {
             **job,
+            "quality": quality,
             "source_asset": public_record(store.get("asset", job["source"])),
             "artifacts": artifacts,
             "attempts": attempts,
@@ -136,8 +158,9 @@ def create_app(config=None, start_workers=True):
                 and not unknown
                 and not missing
                 and engine.model_state["gpu"]["available"],
-                "approve": job["status"] == "review",
+                "approve": job["status"] == "review" and quality["approval_ready"],
                 "generate": bool(job["approval"])
+                and quality["approval_ready"]
                 and not busy
                 and not unknown
                 and not limit_reached,
@@ -281,6 +304,17 @@ def create_app(config=None, start_workers=True):
     @app.post("/api/jobs/{id}/prepare")
     def prepare(id: str, body: Revision):
         engine.prepare(id, body.revision)
+        return view(id)
+
+    @app.get("/api/jobs/{id}/quality")
+    def quality_report(id: str):
+        return store.quality_report(id)
+
+    @app.post("/api/jobs/{id}/quality-review")
+    def quality_review(id: str, body: QualityReview):
+        store.review_quality(
+            id, body.revision, body.report_id, body.finding_id, body.resolution, body.reason
+        )
         return view(id)
 
     @app.post("/api/jobs/{id}/approve")
@@ -443,12 +477,16 @@ def create_app(config=None, start_workers=True):
                     "annotations": [],
                     "references": [],
                     "intervals": [],
+                    "visibility": [],
+                    "seed_frame": None,
                     "consent_confirmed": False,
                 }
                 for s in j["recipe"]["subjects"]
             ],
             "custom_audio": None,
             "audio": "original",
+            "quality_regions": [],
+            "quality_policy": {**j["recipe"].get("quality_policy", {}), "critical_frames": []},
         }
         return store.put("template", {"id": identifier(), "name": j["name"], "recipe": recipe})
 

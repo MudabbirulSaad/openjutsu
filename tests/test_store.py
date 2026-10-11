@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from openjutsu.store import Conflict, Store, money
 from openjutsu.types import CreateJob
+from quality_test_utils import attach_quality
 
 
 @pytest.fixture
@@ -10,7 +11,7 @@ def prepared(tmp_path):
     s = Store(tmp_path)
     s.put("asset", {"id": "source"})
     j = s.create_job(CreateJob(source="source", budget_usd=1))
-    s.update("job", j["id"], {"status": "review", "artifacts": {"conditioning": "clip"}})
+    attach_quality(s, j["id"])
     s.approve(j["id"], 1)
     return s, j["id"]
 

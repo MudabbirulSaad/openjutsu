@@ -20,6 +20,26 @@ export type Recipe = {
   mode: "advanced" | "fast" | "combined";
   subjects: Subject[];
   allow_empty_frames?: boolean;
+  quality_policy?: {
+    face_hull_coverage: number;
+    critical_hull_coverage: number;
+    anatomy_coverage: number;
+    background_selection: number;
+    detection_confidence: number;
+    landmark_confidence: number;
+    structural_mae: number;
+    source_similarity_mae: number;
+    critical_frames: { subject_id: number; frame: number }[];
+  };
+  quality_regions?: {
+    start: number;
+    end: number;
+    subject_id: number | null;
+    part: string;
+    disposition: "replace" | "preserve" | "uncertain";
+    box: [number, number, number, number];
+    reason: string;
+  }[];
   argolink_mode?: "reference" | "edit";
   pitch: number;
   pitch_backend: "librosa" | "rubberband";

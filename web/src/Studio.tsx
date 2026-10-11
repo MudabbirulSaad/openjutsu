@@ -29,6 +29,7 @@ import {
 import { DepthContour } from "./DepthContour";
 import { Button, Sheet } from "./ui";
 import { Viewer } from "./Viewer";
+import { PreparationQuality } from "./PreparationQuality";
 
 import {
   Attempts,
@@ -783,6 +784,14 @@ export function Studio({ connected }: { connected: boolean }) {
       )}
       {stage === "review" && (
         <>
+          <PreparationQuality
+            job={job}
+            onInspect={(frame) => {
+              setFrame(frame);
+              setCompare(true);
+              setTab("conditioning");
+            }}
+          />
           <section>
             <h2>Inspect preparation</h2>
             <p className="small">

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import uvicorn
+from browser_quality import prepare_quality
 from openjutsu.api import create_app
 from openjutsu.config import Config
 from openjutsu.media import audio, run
@@ -79,6 +80,7 @@ def fixture(port=9781):
         "id"
     ]
     store.update("job", job["id"], {"status": "review", "stage": "review", "artifacts": artifacts})
+    prepare_quality(engine, store, job, source, artifacts)
     for provider in ["argolink", "segmind", "byteplus"]:
         settings = {"api_key": "test-only", "account": "synthetic-fixture"}
         engine.secrets.update(provider, settings)
@@ -145,6 +147,7 @@ def fixture(port=9781):
         store.update(
             "job", job["id"], {"status": "review", "stage": "review", "artifacts": outputs}
         )
+        prepare_quality(engine, store, job, source, outputs)
         return {"job": job["id"], "root": str(root)}
 
     @app.post("/api/test-fixture/stale")
