@@ -1,0 +1,9 @@
+OpenJutsu
+Copyright 2026 OpenJutsu contributors
+
+Independent implementation informed by Sirio Berati's public video and
+https://github.com/sirioberati/Genjustsu-Open-Source-Workflow (MIT).
+TEIN branding and example media are not included.
+
+Model weights and third-party libraries are installed separately and are
+not relicensed by OpenJutsu. See docs/models.md for the model inventory.
