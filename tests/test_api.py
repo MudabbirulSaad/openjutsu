@@ -39,6 +39,33 @@ def test_origin_and_credentials(client):
     assert "private-value" not in c.get("/api/system").text
 
 
+def test_reusable_template_does_not_reuse_another_portraits_consent_or_intervals(client):
+    c, _ = client
+    response = c.post(
+        "/api/jobs",
+        json={
+            "source": "source",
+            "recipe": {
+                "end": 4,
+                "subjects": [
+                    {
+                        "id": 1,
+                        "kind": "human",
+                        "consent_confirmed": True,
+                        "references": ["reference"],
+                        "intervals": [{"start": 0, "end": 96}],
+                    }
+                ],
+            },
+        },
+    )
+    assert response.status_code == 200
+    saved = c.post(f"/api/jobs/{response.json()['id']}/save-recipe").json()
+    subject = saved["recipe"]["subjects"][0]
+    assert subject["consent_confirmed"] is False
+    assert subject["references"] == [] and subject["intervals"] == []
+
+
 def test_revision_conflict_and_budget(client):
     c, s = client
     j = c.post("/api/jobs", json={"source": "source"}).json()

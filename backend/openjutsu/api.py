@@ -437,7 +437,14 @@ def create_app(config=None, start_workers=True):
         recipe = {
             **j["recipe"],
             "subjects": [
-                {**s, "portrait_asset": None, "annotations": [], "references": []}
+                {
+                    **s,
+                    "portrait_asset": None,
+                    "annotations": [],
+                    "references": [],
+                    "intervals": [],
+                    "consent_confirmed": False,
+                }
                 for s in j["recipe"]["subjects"]
             ],
             "custom_audio": None,
