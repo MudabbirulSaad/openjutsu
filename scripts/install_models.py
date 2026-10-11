@@ -152,7 +152,7 @@ def install(components, directory, whisper_cache=None):
     # Hash downloaded checkpoints so a recipe can record exactly what was used.
     hashes = {}
     for file in directory.rglob("*"):
-        if file.is_file() and file.suffix in {".pt", ".pth", ".task", ".safetensors"}:
+        if file.is_file() and file.suffix in {".pt", ".pth", ".th", ".task", ".safetensors"}:
             h = hashlib.sha256()
             with file.open("rb") as f:
                 for block in iter(lambda: f.read(1024 * 1024), b""):

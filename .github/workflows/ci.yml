@@ -1,0 +1,42 @@
+name: Checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  cpu-and-studio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.0'
+          python-version: '3.12'
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable && corepack prepare pnpm@11.22.0 --activate
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check backend tests scripts && uv run ruff format --check backend tests scripts
+      - run: uv run pytest -q
+      - run: python scripts/check_public_tree.py
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm test && pnpm build
+        working-directory: web
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+      - name: Browser contracts and accessibility
+        run: |
+          uv run python scripts/browser_fixture.py > /tmp/openjutsu-fixture.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9781/api/system > /dev/null && break; sleep 1; done
+          pnpm --dir web test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-traces
+          path: web/test-results
+          retention-days: 7

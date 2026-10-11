@@ -6,5 +6,5 @@ https://github.com/sirioberati/Genjustsu-Open-Source-Workflow (MIT).
 TEIN branding and example media are not included.
 
 Model weights and third-party libraries are installed separately and are
-not relicensed by OpenJutsu. See docs/models.md for the model inventory.
+not relicensed by OpenJutsu. See docs/setup/models.md for the model inventory.
 The studio self-hosts Inter Variable (Rasmus Andersson), distributed under SIL Open Font License 1.1 through @fontsource-variable/inter. Its license is retained in the installed package. Lucide icons are ISC licensed. React, Radix UI, shadcn/ui patterns, TanStack Query, Tailwind CSS, Vite, and related packages retain their respective licenses; this repository's Apache license does not replace them.
