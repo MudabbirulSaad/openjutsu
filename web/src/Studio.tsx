@@ -72,6 +72,7 @@ export function Studio({ connected }: { connected: boolean }) {
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   const busy = useRef(false);
+  const lastServerRecipe = useRef<Recipe | null>(null);
   useEffect(() => {
     if (!job) return;
     if (!recipe) {
@@ -83,18 +84,28 @@ export function Studio({ connected }: { connected: boolean }) {
       setBase(saved?.revision || job.revision);
     } else if (
       base !== job.revision &&
-      JSON.stringify(recipe) === JSON.stringify(job.recipe)
+      (JSON.stringify(recipe) === JSON.stringify(lastServerRecipe.current) ||
+        JSON.stringify(recipe) === JSON.stringify(job.recipe))
     ) {
+      setRecipe(job.recipe);
       setBase(job.revision);
     }
+    lastServerRecipe.current = job.recipe;
   }, [job, id, recipe, base]);
   useEffect(() => {
-    if (recipe)
+    if (
+      recipe &&
+      job &&
+      base === job.revision &&
+      JSON.stringify(recipe) === JSON.stringify(job.recipe)
+    )
+      localStorage.removeItem(`draft:${id}`);
+    else if (recipe)
       localStorage.setItem(
         `draft:${id}`,
         JSON.stringify({ revision: base, recipe }),
       );
-  }, [id, recipe, base]);
+  }, [id, recipe, base, job]);
   useEffect(() => {
     setFrame(0);
     setPlaying(false);

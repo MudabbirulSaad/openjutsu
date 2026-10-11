@@ -149,6 +149,37 @@ test("read-only reconnection state", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("clean editors follow backend revisions without discarding dirty drafts", async ({
+  page,
+  request,
+}) => {
+  const fixture = await request.get("/api/test-fixture").then((r) => r.json());
+  await page.goto(`/studio/${fixture.job}/prepare`);
+  await expect(
+    page.getByRole("heading", { name: "Source interval" }),
+  ).toBeVisible();
+  await request.post("/api/test-fixture/stale");
+  await expect(
+    page.locator(".studio-meta").getByText("Revision 2", { exact: true }),
+  ).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText(/The saved revision changed/)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Save preparation settings" }),
+  ).toBeDisabled();
+  await page.reload();
+  await expect(
+    page.locator(".studio-meta").getByText("Revision 2", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Add point", exact: true }).click();
+  await request.post("/api/test-fixture/stale");
+  await expect(page.getByText(/The saved revision changed/)).toBeVisible({
+    timeout: 10000,
+  });
+  await expect(
+    page.getByText("Unsaved changes", { exact: true }),
+  ).toBeVisible();
+});
+
 test("three cast intervals and consent persist; one-generation cap survives reload", async ({
   page,
   request,
