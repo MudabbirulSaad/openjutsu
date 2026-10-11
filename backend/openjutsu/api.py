@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .config import Config
 from .engine import Engine
-from .media import normalize
+from .media import normalize, probe
 from .models import readiness
 from .providers import CAPABILITIES, account, make_quotes
 from .store import Conflict, Store, fingerprint, identifier, money
@@ -194,8 +194,11 @@ def create_app(config=None, start_workers=True):
 
     @app.post("/api/jobs")
     def create(body: CreateJob):
-        if store.get("asset", body.source)["kind"] != "video":
+        source = store.get("asset", body.source)
+        if source["kind"] != "video":
             raise ValueError("Select a video source")
+        if body.recipe.end > source["metadata"]["duration"] + 0.01:
+            raise ValueError("Trim end exceeds source duration")
         job = store.create_job(body)
         return view(job["id"])
 
@@ -214,14 +217,10 @@ def create_app(config=None, start_workers=True):
 
     @app.put("/api/jobs/{id}/budget")
     def budget(id: str, body: Budget):
-        j = store.get("job", id)
-        if money(body.budget_usd) < j["spent"] + j["reserved"]:
-            raise Conflict("Limit cannot be below existing spend and reservations")
-        store.update("job", id, {"budget": money(body.budget_usd)})
+        store.budget(id, money(body.budget_usd))
         return view(id)
 
-    @app.get("/api/jobs/{id}/source-preview")
-    def source_preview(id: str):
+    def preview_path(id):
         j = store.get("job", id)
         source = store.get("asset", j["source"])
         r = j["recipe"]
@@ -231,7 +230,20 @@ def create_app(config=None, start_workers=True):
         path = config.root / "cache" / (key + ".mp4")
         if not path.exists():
             normalize(source["path"], path, r["start"], r["end"])
+        return path
+
+    @app.get("/api/jobs/{id}/source-preview")
+    def source_preview(id: str):
+        path = preview_path(id)
         return FileResponse(path, media_type="video/mp4")
+
+    @app.get("/api/jobs/{id}/source-frames/{frame}")
+    def source_frame(id: str, frame: int):
+        path = preview_path(id)
+        image = engine.media.frame(
+            {"path": str(path), "hash": path.stem, "metadata": probe(path)}, frame
+        )
+        return FileResponse(image, media_type="image/png")
 
     @app.post("/api/jobs/{id}/prepare")
     def prepare(id: str, body: Revision):

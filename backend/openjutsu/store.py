@@ -134,6 +134,15 @@ class Store:
             self._event(db, job["id"], "created")
         return job
 
+    def budget(self, id, limit):
+        with self.transaction() as db:
+            job = self._get(db, "job", id)
+            if limit < job["spent"] + job["reserved"]:
+                raise Conflict("Limit cannot be below existing spend and reservations")
+            job["budget"] = limit
+            self._put(db, "job", job)
+            self._event(db, id, "budget", limit=limit)
+
     def recipe(self, id, revision, recipe):
         with self.transaction() as db:
             job = self._get(db, "job", id)

@@ -16,3 +16,10 @@ Self-hosted Inter; tabular timecodes; 4px spacing grid; 6–8px corners; visible
 Backend state controls available actions, blocking reasons, costs, reservations, and approvals. One event stream feeds snapshots. Preserve dirty edits through reconnects and stale revision errors. Never retry paid mutations automatically. Provider rows distinguish ordinary edits from continuation-capable drafts and show qualification status.
 
 Keyboard-accessible trimming, frame stepping, annotation coordinates, labelled references, and resize-aware point mapping are required. Tablets use an inspector drawer; phones stack the workspace. Exact media coordinates ignore letterboxing. Errors remain inline and name the next available action. Settings show real hardware/model/provider readiness rather than simulated progress.
+# Implementation contract
+
+The guided studio uses `/api/jobs/{id}` as its state authority and a single ordered `/api/events` stream to refresh queries. Reconnection falls back to read-only polling. Mutations have retries disabled; paid controls are latched while an operation is pending. The server validates revision, approval, quote expiry, account and reservation atomically.
+
+Unsaved recipes are retained in browser local storage with their base revision. A stale draft remains visible and cannot be submitted. Settings submit secrets directly to the backend and never read them back. Clip media uses normalized browser copies; paused review requests indexed PNG frames. Click coordinates exclude letterbox regions, with numeric point and box controls as keyboard alternatives.
+
+UI availability means installed dependencies and files, not measured quality. Provider qualification requires a settled pilot and human scores. The default spending limit is zero. The studio shows uncertain submissions and provides dashboard-based reconciliation rather than an automatic retry.
