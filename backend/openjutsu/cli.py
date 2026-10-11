@@ -16,7 +16,7 @@ def serve(host: str = "127.0.0.1", port: int = 9780):
 
     from .api import create_app
 
-    uvicorn.run(create_app(), host=host, port=port)
+    uvicorn.run(create_app(), host=host, port=port, timeout_graceful_shutdown=5)
 
 
 @app.command()
