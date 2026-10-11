@@ -31,7 +31,9 @@ jobs:
         working-directory: web
       - name: Browser contracts and accessibility
         run: |
-          uv run python scripts/browser_fixture.py > /tmp/openjutsu-fixture.log 2>&1 &
+          .venv/bin/python scripts/browser_fixture.py > /tmp/openjutsu-fixture.log 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:9781/api/system > /dev/null && break; sleep 1; done
           pnpm --dir web test:e2e
       - uses: actions/upload-artifact@v4
