@@ -53,7 +53,12 @@ def verify_npz(path, expected=None):
 
 
 def verify_npy(path, expected=None):
-    values = np.load(path, mmap_mode="r", allow_pickle=False)
+    try:
+        values = np.load(path, mmap_mode="r", allow_pickle=False)
+    except OSError as exc:
+        # Windows mapping of a truncated payload raises OSError instead of ValueError.
+        # Preserve its diagnostic cause while exposing a consistent validation failure.
+        raise ValueError("Numerical array cannot be mapped for readback") from exc
     try:
         if Path(path).stat().st_size != values.offset + values.nbytes:
             raise ValueError("Numerical array payload length differs from its header")
@@ -151,7 +156,9 @@ def sync_outputs(paths):
     parents = set()
     for name in paths.values():
         path = Path(name)
-        with path.open("rb") as stream:
+        # Windows FlushFileBuffers requires a writable handle. Opening without
+        # truncation also works on POSIX and does not change the verified bytes.
+        with path.open("r+b") as stream:
             os.fsync(stream.fileno())
         parents.add(path.parent)
     for parent in parents:

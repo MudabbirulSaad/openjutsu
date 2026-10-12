@@ -2,13 +2,33 @@
 
 **Artifact safeguards implemented; overall stability acceptance is not met.** The native
 NumPy failure remains reproducible and unisolated. Review this as a draft change, not a
-claim that the workstation or numerical runtime has been repaired. Do not proceed to
-Simple Mode/progress implementation or cloud qualification on this evidence.
+claim that the workstation or numerical runtime has been repaired. The 2026-10-12
+engineering assignment separately authorizes code-integrity acceptance and independently
+testable software progress; workstation/GPU and paid-provider qualification remain open.
 
 Base: `01e03bc39de32fc0f57bbbadd2a77052cf7cb71c` (merged Step 4.5), branch
 `codex/step-5-artifact-integrity`. The [post-merge main CI run](https://github.com/MudabbirulSaad/openjutsu/actions/runs/38173362369)
 passed before production edits. Local main was fast-forwarded to that exact SHA with a clean
 tree. All original Step 1–4 commits remain ancestors. No established commit was rewritten.
+
+## Later code-integrity acceptance scope (2026-10-12)
+
+Independent review of remote `8516b4d` found no merge-blocking artifact/cache
+defect. Its exact-head remote CI had 120 backend passes, 88 private-fixture skips,
+5 expected failures, 4 frontend tests and 6 browser/accessibility contracts.
+
+Fresh frozen Windows Python 3.12.14/NumPy 2.5.4 validation found two portability
+issues: worker-output flushing needs a writable, nontruncating handle, and a
+truncated NPY mmap raises OSError there. These are corrected without relaxing
+readback or publication checks. Eighteen focused checks passed after the fixes.
+The unchanged strict palette child then failed with access violation
+`0xC0000005`; a concurrent broad local suite was stopped on learning the result.
+Windows is therefore also unqualified. No retry, skip or host setting change
+was used to hide that failure. Local diagnostic notes are retained outside Git.
+
+Acceptance of this code requires CI on the final head and does not close native
+stability, repeatable real-media GPU execution or paid-provider qualification.
+The roadmap/checkpoint track the newly authorized independent software program.
 
 ## Findings and independent reproductions
 

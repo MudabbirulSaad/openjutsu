@@ -4,8 +4,10 @@
 OpenJutsu is not required to trigger the failure. Host CPU/firmware instability (D)
 is a material concern; a WSL/runtime interaction (C) and a shared native dependency
 defect (B) remain possible. No faulty application write or safe software correction
-has been established. Keep [PR #3](https://github.com/MudabbirulSaad/openjutsu/pull/3)
-draft and unmerged.
+has been established. Under the earlier Step 5.1 scope, the recommendation was to
+keep [PR #3](https://github.com/MudabbirulSaad/openjutsu/pull/3) draft and unmerged.
+The later engineering assignment separates code-integrity acceptance from runtime
+qualification; the native fault and all investigation results below remain open.
 
 Investigation date: 12 October 2026, Australia/Sydney. Base branch:
 `codex/step-5-artifact-integrity`; base commit:
@@ -340,8 +342,13 @@ and synthetic diagnostic script are staged for the local follow-up commit.
 
 ## Recommended safe next steps — require approval before changes
 
-Stop software implementation and keep PR #3 draft. There is no evidence-based
-application patch to propose. The next investigation crosses the system-level
+This was the recommendation under the earlier Step 5.1 acceptance scope. The
+2026-10-12 engineering assignment now separately authorizes independently validated
+software changes and code-integrity acceptance of PR #3, with runtime qualification
+explicitly open. It does not authorize any of the system changes below.
+
+There is no evidence-based application patch that repairs this native fault.
+The next runtime investigation crosses the system-level
 boundary explicitly reserved for approval in the Step 5.1 request:
 
 1. **Read-only BIOS review in an agreed maintenance window.** With the owner
