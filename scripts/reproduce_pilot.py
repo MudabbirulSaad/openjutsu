@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from openjutsu.artifacts import write_json, write_npz
 from openjutsu.media import probe
 from openjutsu.tracking import load_masks
 from preserve_pilot import private_destination, sha256
@@ -135,7 +136,7 @@ def main():
     for key in ("normalized", "depth", "conditioning"):
         assert probe(artifacts[key]["path"])["frames"] == 432
         arrays[key] = decode_frames(artifacts[key]["path"], indices, 540, 960)
-    np.savez(out / "frames.npz", **arrays)
+    write_npz(out / "frames.npz", arrays, compressed=False)
     fixture = {
         "frame_ids": indices,
         "subject_id": 3,
@@ -151,7 +152,7 @@ def main():
         "artifact_hashes": {k: a["hash"] for k, a in artifacts.items()},
         "fixture_sha256": sha256(out / "frames.npz"),
     }
-    (out / "fixture.json").write_text(json.dumps(fixture, indent=2))
+    write_json(out / "fixture.json", fixture)
     print(f"Private fixture: {len(indices)} exact indexed frames, revision {manifest['revision']}")
     if args.replay_sam:
         replay_sam(

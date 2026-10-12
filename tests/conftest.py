@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from openjutsu.artifacts import verify_npz
 
 
 def pytest_addoption(parser):
@@ -37,6 +38,7 @@ def load_private_fixture(folder):
     metadata = json.loads((folder / "fixture.json").read_text())
     with (folder / "frames.npz").open("rb") as stream:
         assert file_digest(stream, "sha256").hexdigest() == metadata["fixture_sha256"]
+    verify_npz(folder / "frames.npz")
     with np.load(folder / "frames.npz", allow_pickle=False) as archive:
         arrays = {k: archive[k] for k in archive.files}
     return metadata, arrays
